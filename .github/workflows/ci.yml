@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  native:
+    name: ${{ matrix.os }} · kernel + módulos + tests
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── deps Linux ──────────────────────────────────────────────────
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libssl-dev zlib1g-dev ninja-build
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake --preset linux-release
+
+      # Windows usa el preset MSVC; macOS el de clang.
+      # VERIFICAR-EN-CI: WebView2 SDK y Cocoa framework paths.
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --preset windows-release
+        continue-on-error: true # F1: backends win en verificación
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --preset macos-release
+        continue-on-error: true
+
+      - name: Build
+        run: cmake --build --preset ${{ runner.os == 'Linux' && 'linux-release' || (runner.os == 'Windows' && 'windows-release' || 'macos-release') }}
+        continue-on-error: ${{ runner.os != 'Linux' }}
+
+      - name: Tests
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build/linux-release --output-on-failure
+
+  packages:
+    name: Paquetes npm (pnpm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm -r build
+      - run: pnpm -r typecheck

@@ -1,0 +1,15 @@
+{
+  "name": "owear-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Owear — native multiplatform desktop framework (monorepo)",
+  "scripts": {
+    "build:native": "cmake --preset linux-release && cmake --build --preset linux-release",
+    "test:native": "ctest --test-dir build/linux-release --output-on-failure",
+    "build:packages": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

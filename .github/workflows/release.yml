@@ -1,0 +1,45 @@
+name: Release (npm)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # provenance npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      # binarios del kernel por plataforma: los artefactos deben publicarse
+      # antes como @owear-linux-x64-gnu / @owear-win32-x64 / @owear-darwin-*
+      # desde runners nativos (ver docs/ROADMAP.md F4+).
+      - name: Verifica paquetes de runtime presentes en el registro
+        run: |
+          for pkg in @owear/linux-x64-gnu @owear/win32-x64 @owear/darwin-arm64; do
+            npm view "$pkg" version >/dev/null 2>&1 || {
+              echo "::warning::$pkg no publicado aún — @owear/core lo declarará como optional y la instalación fallará en ese SO"
+            }
+          done
+
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm -r build
+      - run: pnpm -r typecheck
+
+      - name: Publish (scoped → público)
+        run: pnpm -r publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

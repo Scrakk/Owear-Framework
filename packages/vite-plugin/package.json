@@ -1,0 +1,18 @@
+{
+  "name": "@owear/vite-plugin",
+  "version": "0.1.0",
+  "description": "Plugin de Vite para módulos nativos de Owear (.cpp → .owm + bindings)",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "dependencies": {
+    "@owear/cli": "workspace:*"
+  },
+  "files": ["src"],
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,24 @@
+# Build
+build/
+build-*/
+out/
+dist/
+*.o
+*.so
+*.dll
+*.dylib
+*.owm
+
+# Node
+node_modules/
+
+# CMake / IDE
+.cache/
+.vscode/
+.idea/
+compile_commands.json
+CMakeUserPresets.json
+
+# OS
+.DS_Store
+Thumbs.db

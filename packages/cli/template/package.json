@@ -1,0 +1,19 @@
+{
+  "name": "mi-app-owear",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ow dev",
+    "build": "ow build"
+  },
+  "dependencies": {
+    "@owear/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@owear/cli": "^0.1.0",
+    "@owear/vite-plugin": "^0.1.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}

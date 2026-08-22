@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mi App Owear</title>
+</head>
+<body>
+  <header data-ow-drag class="titlebar">
+    <span>Mi App Owear</span>
+    <nav>
+      <button data-ow-no-drag onclick="ow.invoke('ow-window','minimize', window.__owWindowId)">–</button>
+      <button data-ow-no-drag onclick="ow.invoke('ow-window','maximize', window.__owWindowId, true)">□</button>
+      <button data-ow-no-drag onclick="ow.invoke('ow-window','close', window.__owWindowId)">✕</button>
+    </nav>
+  </header>
+  <main>
+    <h1>Funciona 🚀</h1>
+    <p id="demo">invocando módulo nativo…</p>
+    <pre id="out"></pre>
+  </main>
+  <script type="module" src="/src/renderer.ts"></script>
+</body>
+</html>
