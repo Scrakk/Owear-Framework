@@ -28,7 +28,8 @@ void readText(const ow_request_t*, ow_response_t* res) {
 
 void writeText(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "text requerido");
     gtk_clipboard_set_text(Sys(), parsed.value->AsArray()[0].AsString().c_str(), -1);
     gtk_clipboard_store(Sys());
@@ -60,7 +61,8 @@ void readImage(const ow_request_t*, ow_response_t* res) {
 
 void writeImage(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "pngB64 requerido");
     std::vector<uint8_t> png;
     if (!ow::b64::Decode(parsed.value->AsArray()[0].AsString(), png))

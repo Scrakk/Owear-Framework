@@ -64,17 +64,4 @@ void cwd(const ow_request_t*, ow_response_t* res) {
               Value(std::string(getcwd(buf, sizeof(buf)) ?: "")).Serialize().c_str());
 }
 
-const ow_fn_entry_t kDirsFns[] = {
-    {"homeDir", &homeDir},     {"appDataDir", &appDataDir},
-    {"userDataDir", &userDataDir}, {"cacheDir", &cacheDir},
-    {"tempDir", &tempDir},     {"configDir", &configDir},
-    {"exeDir", &exeDir},       {"cwd", &cwd},
-};
 } // namespace pathdirs
-
-const ow_fn_entry_t kDirsFns[] = {
-    {"homeDir", &pathdirs::homeDir},         {"appDataDir", &pathdirs::appDataDir},
-    {"userDataDir", &pathdirs::userDataDir}, {"cacheDir", &pathdirs::cacheDir},
-    {"tempDir", &pathdirs::tempDir},         {"configDir", &pathdirs::configDir},
-    {"exeDir", &pathdirs::exeDir},           {"cwd", &pathdirs::cwd},
-};

@@ -30,6 +30,6 @@ if(OW_PLATFORM STREQUAL "linux")
 endif()
 
 ow_add_module(tray
-    SOURCES src/tray_${OW_PLATFORM}.cpp
+    SOURCES src/tray_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${TRAY_LIBS_STR})
 target_compile_options(owear-api-tray PRIVATE ${TRAY_CFLAGS})

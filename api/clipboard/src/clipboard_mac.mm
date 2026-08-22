@@ -2,7 +2,7 @@
 // Copyright 2026 Owear Contributors
 // SPDX-License-Identifier: Apache-2.0
 //
-// api/clipboard/src/clipboard_linux.cpp — GtkClipboard (texto + imagen PNG).
+// api/clipboard/src/clipboard_mac.mm — NSPasteboard (texto + imagen PNG).
 //
 #include "ow/Base64.h"
 #include "ow/Json.h"
@@ -28,7 +28,8 @@ void readText(const ow_request_t*, ow_response_t* res) {
 
 void writeText(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "text requerido");
     [Sys() clearContents];
     [Sys() setString:[NSString stringWithUTF8String:parsed.value->AsArray()[0].AsString().c_str()]
@@ -37,54 +38,55 @@ void writeText(const ow_request_t* req, ow_response_t* res) {
 }
 
 void readImage(const ow_request_t*, ow_response_t* res) {
-    GdkPixbuf* img = gtk_clipboard_wait_for_image(Sys());
-    if (!img) return RespondOk(res, "null");
-    gchar* buf = nullptr;
-    gsize len = 0;
-    GError* err = nullptr;
-    gdk_pixbuf_save_to_buffer(img, &buf, &len, "png", &err, nullptr);
-    if (err || !buf) {
-        if (err) g_error_free(err);
-        g_object_unref(img);
-        return RespondError(res, "PNG encode falló");
+    NSData* png = [Sys() dataForType:NSPasteboardTypePNG];
+    NSImage* nsImg = nil;
+    if (png) {
+        nsImg = [[NSImage alloc] initWithData:png];
+    } else {
+        // Algunas apps sólo publican TIFF; lo convertimos a PNG.
+        NSData* tiff = [Sys() dataForType:NSPasteboardTypeTIFF];
+        if (!tiff) return RespondOk(res, "null");
+        nsImg = [[NSImage alloc] initWithData:tiff];
+        NSBitmapImageRep* rep =
+            [NSBitmapImageRep imageRepWithData:tiff];
+        if (!rep) return RespondOk(res, "null");
+        png = [rep representationUsingType:NSBitmapImageFileTypePNG
+                                 properties:@{}];
     }
-    const char* id = ow_shm_put(reinterpret_cast<const uint8_t*>(buf), len);
+    if (!png || !nsImg) return RespondOk(res, "null");
+
+    NSSize size = nsImg.size;
+    const uint8_t* bytes = static_cast<const uint8_t*>(png.bytes);
+    size_t len = png.length;
+    const char* id = ow_shm_put(bytes, len);
     std::string json = "{\"__ow_shm\":{\"id\":\"" + std::string(id ?: "") +
                        "\",\"size\":" + std::to_string(len) +
-                       ",\"width\":" + std::to_string(gdk_pixbuf_get_width(img)) +
-                       ",\"height\":" + std::to_string(gdk_pixbuf_get_height(img)) +
+                       ",\"width\":" + std::to_string((int)size.width) +
+                       ",\"height\":" + std::to_string((int)size.height) +
                        ",\"format\":\"png\"}}";
-    g_free(buf);
-    g_object_unref(img);
     RespondOk(res, json.c_str());
 }
 
 void writeImage(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "pngB64 requerido");
     std::vector<uint8_t> png;
     if (!ow::b64::Decode(parsed.value->AsArray()[0].AsString(), png))
         return RespondError(res, "b64 inválido");
 
-    GError* err = nullptr;
-    GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
-    gdk_pixbuf_loader_write(loader, png.data(), png.size(), &err);
-    gdk_pixbuf_loader_close(loader, &err);
-    GdkPixbuf* img = err ? nullptr : gdk_pixbuf_loader_get_pixbuf(loader);
-    if (!img) {
-        if (err) g_error_free(err);
-        g_object_unref(loader);
-        return RespondError(res, "PNG inválido");
-    }
-    gtk_clipboard_set_image(Sys(), img);
-    gtk_clipboard_store(Sys());
-    g_object_unref(loader);
+    NSData* data = [NSData dataWithBytes:png.data() length:png.size()];
+    NSImage* img = [[NSImage alloc] initWithData:data];
+    if (!img) return RespondError(res, "PNG inválido");
+
+    [Sys() clearContents];
+    [Sys() setData:data forType:NSPasteboardTypePNG];
     RespondOk(res, "null");
 }
 
 void clear(const ow_request_t*, ow_response_t* res) {
-    gtk_clipboard_clear(Sys());
+    [Sys() clearContents];
     RespondOk(res, "null");
 }
 

@@ -207,17 +207,3 @@ void utimes(const ow_request_t* req, ow_response_t* res) {
 }
 
 } // namespace fsimpl
-
-const ow_fn_entry_t kMetaFns[] = {
-    {"copy", &fsimpl::copy},
-    {"rename", &fsimpl::renameFn},
-    {"chmod", &fsimpl::chmodFn},
-    {"symlink", &fsimpl::symlinkFn},
-    {"readlink", &fsimpl::readlinkFn},
-    {"lstat", &fsimpl::lstat},
-    {"realpath", &fsimpl::realpath},
-    {"mkdtemp", &fsimpl::mkdtemp},
-    {"access", &fsimpl::accessFn},
-    {"truncate", &fsimpl::truncateFn},
-    {"utimes", &fsimpl::utimes},
-};

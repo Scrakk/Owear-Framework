@@ -51,7 +51,7 @@ export type WindowEventMap = {
   unmaximize: void
   enterFullScreen: void
   leaveFullScreen: void
-  closeRequested: void
+  closeRequested: { requestId: number }
   closed: void
 }
 
@@ -72,7 +72,11 @@ class ControlChannel extends EventEmitter {
         this.socket = sock
         resolve()
       })
-      sock.once('error', reject)
+      sock.once('error', (err: Error) => {
+        this.socket = null
+        this.rejectAllPending(err)
+        reject(err)
+      })
       sock.on('data', (chunk: Buffer) => {
         this.buffer += chunk.toString('utf8')
         let idx: number
@@ -84,9 +88,17 @@ class ControlChannel extends EventEmitter {
       })
       sock.on('close', () => {
         this.socket = null
+        this.rejectAllPending(new Error('conexión cerrada'))
         this.emit('disconnected')
       })
     })
+  }
+
+  private rejectAllPending(err: Error) {
+    for (const { reject } of this.pending.values()) {
+      reject(err)
+    }
+    this.pending.clear()
   }
 
   private handleLine(line: string) {
@@ -174,6 +186,8 @@ export const app = {
 export class BrowserWindow extends EventEmitter {
   private _id: number | null = null
   private _options: WindowOptions
+  private _onWindowEvent: (params: any) => void
+  private _onDisconnected: () => void
 
   constructor(options: WindowOptions = {}) {
     super()
@@ -181,6 +195,12 @@ export class BrowserWindow extends EventEmitter {
     if (!readyPromise) {
       throw new Error('BrowserWindow creado antes de app.whenReady()')
     }
+    this._onWindowEvent = (params: any) => {
+      if (params.windowId !== this._id) return
+      this.emit(params.name, params.payload)
+      if (params.name === 'closed') this._unwireEvents()
+    }
+    this._onDisconnected = () => this.emit('disconnected')
     readyPromise.then(() => this._create()).catch((e) => this.emit('error', e))
   }
 
@@ -193,13 +213,13 @@ export class BrowserWindow extends EventEmitter {
   }
 
   private _wireEvents() {
-    const handler = (params: any) => {
-      if (params.windowId !== this._id) return
-      this.emit(params.name, params.payload)
-      if (params.name === 'closed') this.emit('closed')
-    }
-    channel.on('window.event', handler)
-    channel.on('disconnected', () => this.emit('disconnected'))
+    channel.on('window.event', this._onWindowEvent)
+    channel.on('disconnected', this._onDisconnected)
+  }
+
+  private _unwireEvents() {
+    channel.off('window.event', this._onWindowEvent)
+    channel.off('disconnected', this._onDisconnected)
   }
 
   get id(): number | null {
@@ -294,6 +314,8 @@ declare global {
   interface Window {
     ow?: OwBridge
   }
+  // eslint-disable-next-line no-var
+  const ow: OwBridge
 }
 
 export const platform = os.platform()

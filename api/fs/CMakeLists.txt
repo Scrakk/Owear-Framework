@@ -13,5 +13,5 @@ ow_add_module(fs
         src/meta.cpp
         src/handles.cpp
         src/watch/watch.cpp
-        src/watch/watch_${OW_PLATFORM}.cpp
+        src/watch/watch_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${OW_FS_LIBS})

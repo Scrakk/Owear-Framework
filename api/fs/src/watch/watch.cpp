@@ -141,12 +141,3 @@ void unwatch(const ow_request_t* req, ow_response_t* res) {
 }
 
 } // namespace fsimpl
-
-const ow_fn_entry_t kWatchFns[] = {
-    {"watch", &fsimpl::watch},
-    {"unwatch", &fsimpl::unwatch},
-};
-
-namespace fsimpl {
-const uint32_t kWatchFnCount = sizeof(kWatchFns) / sizeof(kWatchFns[0]);
-} // namespace fsimpl

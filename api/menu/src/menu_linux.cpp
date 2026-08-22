@@ -12,6 +12,8 @@
 
 #include <gtk/gtk.h>
 
+#include <deque>
+
 namespace menu {
 
 using ow::json::Array;
@@ -32,7 +34,7 @@ static void OnItemActivate(GtkMenuItem*, gpointer user_data) {
 }
 
 static void BuildItems(GtkMenuShell* shell, const Array& items,
-                       std::vector<std::string>& labels) {
+                       std::deque<std::string>& labels) {
     for (const auto& it : items) {
         if (!it.IsObject()) continue;
         std::string type =
@@ -71,7 +73,7 @@ void popup(const ow_request_t* req, ow_response_t* res) {
     g_win = req->window_id;
 
     GtkMenu* m = GTK_MENU(gtk_menu_new());
-    std::vector<std::string> labels;
+    std::deque<std::string> labels;
     BuildItems(GTK_MENU_SHELL(m), parsed.value->AsArray()[0].AsArray(), labels);
     gtk_widget_show_all(GTK_WIDGET(m));
     gtk_menu_popup_at_pointer(m, nullptr); // en el cursor

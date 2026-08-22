@@ -128,6 +128,18 @@ public:
 
         config_ = [WKWebViewConfiguration new];
 
+        // El scheme "app://" debe registrarse en la configuración ANTES de
+        // instanciar el WKWebView: WKWebViewConfiguration se COPIA al crear
+        // la vista, así que cambios posteriores (incluido setURLSchemeHandler)
+        // no tienen efecto sobre la instancia ya creada. El handler lee
+        // `root` de forma perezosa en cada request (igual que el patrón de
+        // WebKitGTKBackend::Create en Linux), así que RegisterAssetScheme()
+        // puede seguir llamándose después de Create(), como hacen todas las
+        // plataformas hoy.
+        assetHandler_ = [[OwSchemeHandler alloc] init];
+        assetHandler_.root = pendingAssetRoot_;
+        [config_ setURLSchemeHandler:assetHandler_ forURLScheme:@"app"];
+
         // scripts pendientes (inyectados antes de existir el webview)
         for (const auto& js : pendingScripts_) AddUserScript(js);
         pendingScripts_.clear();
@@ -223,9 +235,22 @@ public:
 
     void RegisterAssetScheme(const std::string& scheme,
                              const std::filesystem::path& root) override {
-        OwSchemeHandler* h = [[OwSchemeHandler alloc] init];
-        h.root = root;
-        [config_ setURLSchemeHandler:h forURLScheme:StdToNs(scheme)];
+        if (scheme != "app") {
+            // v1: solo "app" se registra (en Create(), antes de instanciar
+            // el WKWebView). Ver comentario en Create().
+            log::Warn("webview", "RegisterAssetScheme: esquema no soportado en macOS: " + scheme);
+            return;
+        }
+        if (assetHandler_) {
+            // El WKWebView ya existe (o está a punto de crearse en Create());
+            // el handler ya quedó registrado en la config. Solo actualizamos
+            // la raíz, que se lee al vuelo en cada request.
+            assetHandler_.root = root;
+        } else {
+            // Create() aún no se ha llamado: guarda la raíz para aplicarla
+            // cuando se cree el handler.
+            pendingAssetRoot_ = root;
+        }
     }
 
     void Resize(int x, int y, int w, int h) override {
@@ -239,9 +264,11 @@ private:
     WKUserContentController* ucc_ = nil;
     WKWebView* webview_ = nil;
     OwMessageProxy* proxy_ = nil;
+    OwSchemeHandler* assetHandler_ = nil;
     WebMessageHandler handler_;
     std::vector<std::string> pendingScripts_;
     std::string pendingUrl_;
+    std::filesystem::path pendingAssetRoot_;
 };
 
 } // namespace

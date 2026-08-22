@@ -106,6 +106,19 @@ private:
         while (true) {
             int cfd = ::accept4(fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
             if (cfd < 0) break;
+
+            // Verificación mínima de seguridad: solo aceptar clientes que
+            // corran con el mismo uid que este proceso (evita que otro
+            // usuario local del sistema controle la app vía el socket).
+            struct ucred cred{};
+            socklen_t credLen = sizeof(cred);
+            if (::getsockopt(cfd, SOL_SOCKET, SO_PEERCRED, &cred, &credLen) != 0 ||
+                cred.uid != ::getuid()) {
+                log::Warn("control", "conexión rechazada: uid remoto no coincide");
+                ::close(cfd);
+                continue;
+            }
+
             uint64_t id = nextClientId_++;
             clients_[id] = Client{cfd, {}};
             auto* ctx = new ClientCtx{this, id};

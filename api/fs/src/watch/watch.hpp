@@ -46,5 +46,3 @@ bool Start(int id, std::string& err);
 void Stop(int id);
 
 } // namespace fswatch
-
-extern const ow_fn_entry_t kWatchFns[];

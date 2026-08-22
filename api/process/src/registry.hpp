@@ -18,6 +18,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <sys/types.h>  // pid_t (mingw) / MSVC no lo define: ver typedef abajo
+#if defined(_MSC_VER)
+typedef int pid_t;
+#endif
 #else
 #include <sys/types.h>
 #endif
@@ -55,7 +59,17 @@ inline Proc* Get(int id) {
 
 inline void Remove(int id) {
     std::lock_guard lock(g_mu);
-    g_procs.erase(id);
+    auto it = g_procs.find(id);
+    if (it == g_procs.end()) return;
+    Proc* p = it->second;
+    // Los hilos reader/waiter pueden estar ejecutando este mismo código (p.ej.
+    // el propio hilo `reader` llama a Remove() justo antes de terminar), así
+    // que no podemos hacer join() aquí. Se hace detach() para que el destructor
+    // de std::thread no llame a std::terminate() al borrar `p`.
+    if (p->reader.joinable()) p->reader.detach();
+    if (p->waiter.joinable()) p->waiter.detach();
+    delete p;
+    g_procs.erase(it);
 }
 
 /// Emite evento del proceso (el host hace marshaling al main thread).

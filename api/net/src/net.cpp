@@ -31,7 +31,7 @@ using ow::Module::RespondOk;
 // → {status, headers{minúsculas}, body(string) | __ow_shm}
 void request(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() ||
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
         !parsed.value->AsArray()[0].IsObject())
         return RespondError(res, "objeto {method,url,...} requerido");
     const auto& o = parsed.value->AsArray()[0];

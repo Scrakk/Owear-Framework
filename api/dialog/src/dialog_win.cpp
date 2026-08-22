@@ -36,6 +36,12 @@ void open(const ow_request_t* req, ow_response_t* res) {
             : "open";
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    // RAII: garantiza CoUninitialize() en cualquier punto de salida de la
+    // función (sólo si CoInitializeEx tuvo éxito, incl. S_FALSE).
+    struct ComGuard {
+        bool active;
+        ~ComGuard() { if (active) CoUninitialize(); }
+    } comGuard{SUCCEEDED(hr)};
     bool multi = mode == "multi";
     bool save = mode == "save";
     bool dir = mode == "dir";

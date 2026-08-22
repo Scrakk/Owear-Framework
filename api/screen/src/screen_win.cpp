@@ -13,13 +13,18 @@ using ow::json::Object;
 using ow::json::Value;
 using ow::Module::RespondOk;
 
+struct MonEnumCtx {
+    Array* arr;
+    int idx = 0;
+};
+
 static BOOL CALLBACK MonProc(HMONITOR h, HDC, LPRECT, LPARAM data) {
-    auto* arr = reinterpret_cast<Array*>(data);
+    auto* ctx = reinterpret_cast<MonEnumCtx*>(data);
+    Array* arr = ctx->arr;
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoA(h, &mi);
     Object o;
-    static int idx = 0;
-    o.emplace_back("id", Value(static_cast<int64_t>(idx++)));
+    o.emplace_back("id", Value(static_cast<int64_t>(ctx->idx++)));
     o.emplace_back("primary", Value((mi.dwFlags & MONITORINFOF_PRIMARY) != 0));
     {
         Object b;
@@ -35,7 +40,8 @@ static BOOL CALLBACK MonProc(HMONITOR h, HDC, LPRECT, LPARAM data) {
 
 void getAllDisplays(const ow_request_t*, ow_response_t* res) {
     Array arr;
-    EnumDisplayMonitors(nullptr, nullptr, MonProc, (LPARAM)&arr);
+    MonEnumCtx ctx{&arr};
+    EnumDisplayMonitors(nullptr, nullptr, MonProc, (LPARAM)&ctx);
     RespondOk(res, Value(std::move(arr)).Serialize().c_str());
 }
 void getPrimaryDisplay(const ow_request_t*, ow_response_t* res) {
@@ -43,7 +49,8 @@ void getPrimaryDisplay(const ow_request_t*, ow_response_t* res) {
     HMONITOR h = MonitorFromPoint(p, MONITOR_DEFAULTTOPRIMARY);
     (void)h;
     Array arr;
-    EnumDisplayMonitors(nullptr, nullptr, MonProc, (LPARAM)&arr);
+    MonEnumCtx ctx{&arr};
+    EnumDisplayMonitors(nullptr, nullptr, MonProc, (LPARAM)&ctx);
     for (auto& v : arr)
         if (v.Find("primary") && v.Find("primary")->AsBool())
             return RespondOk(res, v.Serialize().c_str());
@@ -53,8 +60,8 @@ void getCursorScreenPoint(const ow_request_t*, ow_response_t* res) {
     POINT p;
     GetCursorPos(&p);
     Object o;
-    o.emplace_back("x", Value(p.x));
-    o.emplace_back("y", Value(p.y));
+    o.emplace_back("x", Value(static_cast<int64_t>(p.x)));
+    o.emplace_back("y", Value(static_cast<int64_t>(p.y)));
     RespondOk(res, Value(std::move(o)).Serialize().c_str());
 }
 } // namespace scr

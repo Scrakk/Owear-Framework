@@ -7,6 +7,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <objbase.h> // CoInitializeEx (LEAN_AND_MEAN lo excluye)
 
 #include <atomic>
 #include <functional>

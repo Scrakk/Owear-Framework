@@ -15,9 +15,6 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 set(OW_KERNEL_SOURCES
-    ${CMAKE_SOURCE_DIR}/api/window/src/window_extra.cpp
-    ${CMAKE_SOURCE_DIR}/api/session/src/session_builtin.cpp
-    ${CMAKE_SOURCE_DIR}/api/crashreporter/src/crashreporter.cpp
     ${CMAKE_SOURCE_DIR}/api/app/src/app_builtin.cpp
     Core/App.cpp
     Core/Log.cpp
@@ -34,6 +31,19 @@ set(OW_KERNEL_SOURCES
     Runtime/Http.cpp
     Runtime/NodeManager.cpp
 )
+
+# window-extras/session/crashreporter dependen de GTK+WebKitGTK/libsoup o de
+# APIs POSIX (execinfo.h) que hoy solo tienen implementación real en Linux.
+# Se compilaban incondicionalmente y rompían la configuración en Windows/macOS
+# (headers inexistentes en esas plataformas). Gateados aquí hasta que existan
+# implementaciones _mac/_win reales — ver docs/ROADMAP.md.
+if(OW_PLATFORM STREQUAL "linux")
+    list(APPEND OW_KERNEL_SOURCES
+        ${CMAKE_SOURCE_DIR}/api/window/src/window_extra.cpp
+        ${CMAKE_SOURCE_DIR}/api/session/src/session_builtin.cpp
+        ${CMAKE_SOURCE_DIR}/api/crashreporter/src/crashreporter.cpp
+    )
+endif()
 
 if(OW_PLATFORM STREQUAL "linux")
     list(APPEND OW_KERNEL_SOURCES

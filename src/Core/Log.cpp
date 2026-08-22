@@ -6,6 +6,11 @@
 #include <ctime>
 #include <mutex>
 
+#ifdef _WIN32
+#include <time.h> // timespec en MinGW vive en el namespace global
+using std::timespec;
+#endif
+
 namespace ow::log {
 
 namespace {

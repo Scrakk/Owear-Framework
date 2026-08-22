@@ -34,7 +34,8 @@ using proc::PtyOpen;
 using proc::PtyResize;
 
 #ifdef _WIN32
-bool WritePtyWin(int id, const char* d, size_t l, std::string& e);
+namespace proc { bool WritePtyWin(int id, const char* d, size_t l,
+                                  std::string& e); }
 #endif
 
 namespace procmod {
@@ -113,7 +114,7 @@ void writeFn(const ow_request_t* req, ow_response_t* res) {
 
     std::string err;
 #ifdef _WIN32
-    bool ok = p->kind == proc::Kind::Pty ? WritePtyWin(id, bytes.data(), bytes.size(), err)
+    bool ok = p->kind == proc::Kind::Pty ? proc::WritePtyWin(id, bytes.data(), bytes.size(), err)
                                          : WriteStdin(id, bytes.data(), bytes.size(), err);
 #else
     bool ok = WriteStdin(id, bytes.data(), bytes.size(), err);

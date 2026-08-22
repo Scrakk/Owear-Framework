@@ -14,8 +14,15 @@
 
 #include <map>
 
-#include <dlfcn.h>
-#include <unistd.h>
+#if defined(_WIN32)
+  #include <windows.h>
+#else
+  #include <dlfcn.h>
+  #include <unistd.h>
+#endif
+#if defined(__APPLE__)
+  #include <mach-o/dyld.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -92,14 +99,35 @@ ow_module_host_t MakeHost() {
 const ow_module_host_t g_host = MakeHost();
 } // namespace
 
-std::vector<std::filesystem::path> ModuleLoader::SearchPaths() {
-    std::vector<std::filesystem::path> paths = SplitPathList(std::getenv("OW_MODULES_DIR"));
+namespace {
+/// Ruta absoluta del ejecutable actual. Vacía si no se pudo resolver.
+std::filesystem::path CurrentExePath() {
+#if defined(_WIN32)
+    wchar_t buf[MAX_PATH];
+    DWORD n = ::GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    if (n == 0 || n == MAX_PATH) return {};
+    return std::filesystem::path(buf, buf + n);
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0) return {};
+    std::error_code ec;
+    auto p = std::filesystem::canonical(buf, ec);
+    return ec ? std::filesystem::path(buf) : p;
+#else
     char exeBuf[4096] = {};
     ssize_t n = readlink("/proc/self/exe", exeBuf, sizeof(exeBuf) - 1);
-    if (n > 0) {
-        exeBuf[n] = 0;
-        paths.emplace_back(std::filesystem::path(exeBuf).parent_path() / "modules");
-    }
+    if (n <= 0) return {};
+    exeBuf[n] = 0;
+    return std::filesystem::path(exeBuf);
+#endif
+}
+} // namespace
+
+std::vector<std::filesystem::path> ModuleLoader::SearchPaths() {
+    std::vector<std::filesystem::path> paths = SplitPathList(std::getenv("OW_MODULES_DIR"));
+    auto exe = CurrentExePath();
+    if (!exe.empty()) paths.emplace_back(exe.parent_path() / "modules");
     return paths;
 }
 
@@ -108,6 +136,34 @@ size_t ModuleLoader::RegisterStatic(const ow_module_desc_t* desc) {
 }
 
 size_t ModuleLoader::LoadFile(const std::filesystem::path& file) {
+#if defined(_WIN32)
+    HMODULE handle = ::LoadLibraryW(file.c_str());
+    if (!handle) {
+        log::Error("loader", "LoadLibrary falló para " + file.string() +
+                                  " (err " + std::to_string(::GetLastError()) + ")");
+        return 0;
+    }
+    auto entry = reinterpret_cast<ow_module_entry_t>(
+        reinterpret_cast<void*>(::GetProcAddress(handle, "ow_module_descriptor")));
+    if (!entry) {
+        log::Error("loader", file.string() + ": símbolo ow_module_descriptor ausente");
+        ::FreeLibrary(handle);
+        return 0;
+    }
+    if (auto setHost = reinterpret_cast<ow_module_set_host_t>(reinterpret_cast<void*>(
+            ::GetProcAddress(handle, "ow_module_set_host"))); setHost) {
+        setHost(&g_host);
+    }
+    const ow_module_desc_t* desc = entry();
+    size_t count = Dispatcher::Get().RegisterModule(desc, file.filename().string());
+    if (count > 0) {
+        std::lock_guard lock(g_mu);
+        g_handles.push_back(reinterpret_cast<void*>(handle));
+    } else {
+        ::FreeLibrary(handle);
+    }
+    return count;
+#else
     void* handle = dlopen(file.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
         log::Error("loader", std::string("dlopen falló: ") + dlerror());
@@ -133,6 +189,7 @@ size_t ModuleLoader::LoadFile(const std::filesystem::path& file) {
         dlclose(handle);
     }
     return count;
+#endif
 }
 
 size_t ModuleLoader::LoadAll() {
@@ -156,7 +213,11 @@ void ModuleLoader::ProvideHostToBuiltins() {
 
 void ModuleLoader::Shutdown() {
     std::lock_guard lock(g_mu);
+#if defined(_WIN32)
+    for (void* h : g_handles) ::FreeLibrary(reinterpret_cast<HMODULE>(h));
+#else
     for (void* h : g_handles) dlclose(h);
+#endif
     g_handles.clear();
 }
 

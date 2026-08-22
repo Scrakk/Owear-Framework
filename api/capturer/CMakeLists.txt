@@ -6,6 +6,6 @@ if(OW_PLATFORM STREQUAL "linux")
     endif()
 endif()
 ow_add_module(capturer
-    SOURCES src/capturer_${OW_PLATFORM}.cpp
+    SOURCES src/capturer_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${OW_GUI_LIBS}
     INCLUDES ${OW_GUI_INCS})

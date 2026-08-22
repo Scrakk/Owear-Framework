@@ -182,10 +182,15 @@ inline ParseResult Parse(std::string_view text) {
     size_t pos = 0;
     ParseResult r;
 
+    // Límite de anidamiento (objetos/arrays): evita stack overflow con JSON
+    // adversarial profundamente anidado en entradas externas (bridge/control).
+    static constexpr int kMaxDepth = 128;
+
     struct Parser {
         std::string_view t;
         size_t& pos;
         std::string err;
+        int depth = 0;
 
         void SkipWs() {
             while (pos < t.size()) {
@@ -326,10 +331,11 @@ inline ParseResult Parse(std::string_view text) {
         }
 
         bool ParseArray(Value& out) {
+            if (++depth > kMaxDepth) return Fail("JSON demasiado anidado");
             ++pos;
             Array arr;
             SkipWs();
-            if (pos < t.size() && t[pos] == ']') { ++pos; out = Value(std::move(arr)); return true; }
+            if (pos < t.size() && t[pos] == ']') { ++pos; --depth; out = Value(std::move(arr)); return true; }
             while (true) {
                 Value item;
                 if (!ParseValue(item)) return false;
@@ -340,15 +346,17 @@ inline ParseResult Parse(std::string_view text) {
                 if (t[pos] == ']') { ++pos; break; }
                 return Fail("',' o ']' esperado");
             }
+            --depth;
             out = Value(std::move(arr));
             return true;
         }
 
         bool ParseObject(Value& out) {
+            if (++depth > kMaxDepth) return Fail("JSON demasiado anidado");
             ++pos;
             Object obj;
             SkipWs();
-            if (pos < t.size() && t[pos] == '}') { ++pos; out = Value(std::move(obj)); return true; }
+            if (pos < t.size() && t[pos] == '}') { ++pos; --depth; out = Value(std::move(obj)); return true; }
             while (true) {
                 SkipWs();
                 if (pos >= t.size() || t[pos] != '"')
@@ -368,6 +376,7 @@ inline ParseResult Parse(std::string_view text) {
                 if (t[pos] == '}') { ++pos; break; }
                 return Fail("',' o '}' esperado");
             }
+            --depth;
             out = Value(std::move(obj));
             return true;
         }

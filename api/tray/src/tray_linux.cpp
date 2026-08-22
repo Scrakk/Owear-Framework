@@ -41,7 +41,8 @@ void create(const ow_request_t* req, ow_response_t* res) {
 void setIcon(const ow_request_t* req, ow_response_t* res) {
     if (!g_indicator) return RespondError(res, "tray.create primero");
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "iconPath requerido (nombre de tema o ruta)");
     // AppIndicator usa nombres de tema/rutas sin extensión; copiar a ~/.icons es
     // responsabilidad del app packager.

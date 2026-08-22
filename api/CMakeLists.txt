@@ -6,6 +6,15 @@
 
 set(OW_API_COMMON_FLAGS -DOW_MODULE_BUILD)
 
+# Extensión de los archivos fuente específicos de plataforma: macOS usa
+# Objective-C++ (.mm) para hablar con Cocoa/AppKit; Linux/Windows usan .cpp.
+# Los módulos seleccionan su fuente como src/<archivo>_${OW_PLATFORM}.${OW_SRC_EXT}
+if(OW_PLATFORM STREQUAL "mac")
+    set(OW_SRC_EXT "mm")
+else()
+    set(OW_SRC_EXT "cpp")
+endif()
+
 # Dependencias GUI compartidas por varias APIs (dialog, clipboard, screen,
 # menu, notification, power, shell) — GTK trae gio/gobject.
 if(OW_PLATFORM STREQUAL "linux")

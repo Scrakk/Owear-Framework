@@ -6,9 +6,11 @@
 //
 #include "ControlServer.hpp"
 #include "../Core/Log.hpp"
+#include "ow/App.h"
 
 #include <dispatch/dispatch.h>
 #include <sys/socket.h>
+#include <sys/ucred.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -55,6 +57,19 @@ public:
                 int cfd = ::accept4(listenFd_, nullptr, nullptr,
                                     SOCK_NONBLOCK | SOCK_CLOEXEC);
                 if (cfd < 0) break;
+
+                // Verificación mínima de seguridad: solo aceptar clientes que
+                // corran con el mismo uid que este proceso (evita que otro
+                // usuario local del sistema controle la app vía el socket).
+                struct xucred cred{};
+                socklen_t credLen = sizeof(cred);
+                if (::getsockopt(cfd, SOL_LOCAL, LOCAL_PEERCRED, &cred, &credLen) != 0 ||
+                    cred.cr_uid != ::getuid()) {
+                    log::Warn("control", "conexión rechazada: uid remoto no coincide");
+                    ::close(cfd);
+                    continue;
+                }
+
                 uint64_t id = nextClientId_++;
                 clients_[id] = Client{cfd, {}};
                 StartReading(id, cfd, q);
@@ -124,7 +139,13 @@ private:
             while ((pos = acc.find('\n')) != std::string::npos) {
                 std::string line = acc.substr(0, pos);
                 acc.erase(0, pos + 1);
-                if (!line.empty()) HandleLine(id, line);
+                // AppKit/WebKit exigen tocar UI solo desde el hilo principal:
+                // HandleLine (y HandleCommand, que crea/destruye NSWindow y
+                // WKWebView) se despacha al main loop. La lectura/accept del
+                // socket sigue en esta cola GCD dedicada (solo I/O).
+                if (!line.empty()) {
+                    App::Post([this, id, line] { HandleLine(id, line); });
+                }
             }
         });
         dispatch_source_set_cancel_handler(src, ^{ ::close(cfd); });

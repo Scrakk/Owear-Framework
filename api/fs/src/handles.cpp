@@ -166,15 +166,3 @@ void closeFn(const ow_request_t* req, ow_response_t* res) {
 }
 
 } // namespace fshandle
-
-const ow_fn_entry_t kHandleFns[] = {
-    {"open", &fshandle::openFn},
-    {"read", &fshandle::readFn},
-    {"write", &fshandle::writeFn},
-    {"size", &fshandle::sizeFn},
-    {"close", &fshandle::closeFn},
-};
-
-namespace fsimpl {
-const uint32_t kHandleFnCount = sizeof(kHandleFns) / sizeof(kHandleFns[0]);
-} // namespace fsimpl

@@ -12,8 +12,8 @@ endif()
 
 set(OW_PROC_SOURCES
     src/module.cpp
-    src/spawn_${OW_PLATFORM}.cpp
-    src/pty/pty_${OW_PLATFORM}.cpp)
+    src/spawn_${OW_PLATFORM}.${OW_SRC_EXT}
+    src/pty/pty_${OW_PLATFORM}.${OW_SRC_EXT})
 if(OW_PLATFORM STREQUAL "linux")
     list(APPEND OW_PROC_SOURCES src/spawn_linux.cpp) # helpers compartidos pipe-reader
 endif()

@@ -117,7 +117,7 @@ void cookiesGet(const ow_request_t* req, ow_response_t* res) {
 // args: [{name, value, domain, path?, maxAge?}]
 void cookiesSet(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() ||
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
         !parsed.value->AsArray()[0].IsObject())
         return RespondError(res, "objeto cookie requerido");
     const auto& c = parsed.value->AsArray()[0];
@@ -344,7 +344,8 @@ void downloadCancel(const ow_request_t* req, ow_response_t* res) {
 // args: [ua] — aplica a TODAS las ventanas vivas
 void setUserAgentAll(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "userAgent requerido");
     std::string ua = parsed.value->AsArray()[0].AsString();
     for (auto& [id, w] : ow::LiveWindows()) {

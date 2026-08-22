@@ -7,6 +7,6 @@ if(OW_PLATFORM STREQUAL "linux")
     set(GS_LIBS ${X11_LIBRARIES})
 endif()
 ow_add_module(globalshortcut
-    SOURCES src/gs_${OW_PLATFORM}.cpp
+    SOURCES src/gs_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${GS_LIBS} ${OW_GUI_LIBS}
     INCLUDES ${OW_GUI_INCS})

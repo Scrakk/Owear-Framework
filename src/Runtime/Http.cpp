@@ -9,11 +9,22 @@
 
 #include "../Core/Log.hpp"
 
-#include <netdb.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include <sys/socket.h>
-#include <unistd.h>
+
+#if defined(_WIN32)
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib")
+  using ow_socklen_t = int;
+  #define OW_SOCK_INVALID INVALID_SOCKET
+#else
+  #include <netdb.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+  using ow_socklen_t = socklen_t;
+  #define OW_SOCK_INVALID (-1)
+#endif
 
 #include <cstring>
 #include <fstream>
@@ -23,6 +34,25 @@
 namespace ow::http {
 
 namespace {
+
+#if defined(_WIN32)
+inline void CloseSocket(int fd) { ::closesocket(static_cast<SOCKET>(fd)); }
+inline int SendRaw(int fd, const char* p, size_t len) {
+    return ::send(static_cast<SOCKET>(fd), p, static_cast<int>(len), 0);
+}
+inline int RecvRaw(int fd, char* buf, size_t len) {
+    return ::recv(static_cast<SOCKET>(fd), buf, static_cast<int>(len), 0);
+}
+struct WsaInit {
+    WsaInit() { WSADATA d; ::WSAStartup(MAKEWORD(2, 2), &d); }
+    ~WsaInit() { ::WSACleanup(); }
+};
+const WsaInit g_wsaInit;
+#else
+inline void CloseSocket(int fd) { ::close(fd); }
+inline int SendRaw(int fd, const char* p, size_t len) { return static_cast<int>(::write(fd, p, len)); }
+inline int RecvRaw(int fd, char* buf, size_t len) { return static_cast<int>(::read(fd, buf, len)); }
+#endif
 
 std::once_flag g_sslInit;
 
@@ -67,6 +97,7 @@ class TlsConnection {
 public:
     ~TlsConnection() {
         if (ssl_) SSL_free(ssl_);
+        if (fd_ >= 0) CloseSocket(fd_);
         // ctx_ es singleton del proceso (compartido) — NUNCA se libera aquí
     }
 
@@ -81,13 +112,25 @@ public:
             return false;
         }
         for (addrinfo* p = res; p; p = p->ai_next) {
+#if defined(_WIN32)
+            fd_ = static_cast<int>(::socket(p->ai_family, p->ai_socktype, p->ai_protocol));
+#else
             fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+#endif
             if (fd_ < 0) continue;
+#if defined(_WIN32)
+            DWORD tv = static_cast<DWORD>(timeoutSecs) * 1000;
+            setsockopt(static_cast<SOCKET>(fd_), SOL_SOCKET, SO_RCVTIMEO,
+                      reinterpret_cast<const char*>(&tv), sizeof(tv));
+            setsockopt(static_cast<SOCKET>(fd_), SOL_SOCKET, SO_SNDTIMEO,
+                      reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
             timeval tv{timeoutSecs, 0};
             setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
             setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            if (::connect(fd_, p->ai_addr, p->ai_addrlen) == 0) break;
-            ::close(fd_);
+#endif
+            if (::connect(fd_, p->ai_addr, static_cast<ow_socklen_t>(p->ai_addrlen)) == 0) break;
+            CloseSocket(fd_);
             fd_ = -1;
         }
         ::freeaddrinfo(res);
@@ -142,8 +185,12 @@ public:
             }
             int err = SSL_get_error(ssl_, n);
             if (err == SSL_ERROR_ZERO_RETURN) return true;
+#if defined(_WIN32)
+            if (err == SSL_ERROR_SYSCALL) return true;
+#else
             if (err == SSL_ERROR_SYSCALL && errno == ECONNRESET) return true;
-            return err == SSL_ERROR_ZERO_RETURN;
+#endif
+            return false;
         }
     }
 
@@ -166,13 +213,25 @@ public:
             return false;
         }
         for (addrinfo* p = res; p; p = p->ai_next) {
+#if defined(_WIN32)
+            fd_ = static_cast<int>(::socket(p->ai_family, p->ai_socktype, p->ai_protocol));
+#else
             fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+#endif
             if (fd_ < 0) continue;
+#if defined(_WIN32)
+            DWORD tv = static_cast<DWORD>(timeoutSecs) * 1000;
+            setsockopt(static_cast<SOCKET>(fd_), SOL_SOCKET, SO_RCVTIMEO,
+                      reinterpret_cast<const char*>(&tv), sizeof(tv));
+            setsockopt(static_cast<SOCKET>(fd_), SOL_SOCKET, SO_SNDTIMEO,
+                      reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
             timeval tv{timeoutSecs, 0};
             setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
             setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            if (::connect(fd_, p->ai_addr, p->ai_addrlen) == 0) break;
-            ::close(fd_);
+#endif
+            if (::connect(fd_, p->ai_addr, static_cast<ow_socklen_t>(p->ai_addrlen)) == 0) break;
+            CloseSocket(fd_);
             fd_ = -1;
         }
         freeaddrinfo(res);
@@ -182,7 +241,7 @@ public:
     bool SendAll(const void* d, size_t l) const {
         const char* p = static_cast<const char*>(d);
         while (l > 0) {
-            ssize_t n = ::write(fd_, p, l);
+            int n = SendRaw(fd_, p, l);
             if (n <= 0) return false;
             p += n;
             l -= static_cast<size_t>(n);
@@ -191,12 +250,12 @@ public:
     }
     bool ReadAll(std::string& out) const {
         char buf[16384];
-        ssize_t n;
-        while ((n = ::read(fd_, buf, sizeof(buf))) > 0)
+        int n;
+        while ((n = RecvRaw(fd_, buf, sizeof(buf))) > 0)
             out.append(buf, static_cast<size_t>(n));
         return true;
     }
-    ~PlainConnection() { if (fd_ >= 0) ::close(fd_); }
+    ~PlainConnection() { if (fd_ >= 0) CloseSocket(fd_); }
 
 private:
     int fd_ = -1;

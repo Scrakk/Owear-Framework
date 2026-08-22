@@ -36,6 +36,28 @@ namespace {
 std::atomic<uint32_t> g_nextWinId{1};
 constexpr wchar_t kOwWindowClass[] = L"OwearWindow";
 
+// Conversiones UTF-8 <-> UTF-16 correctas (mismo enfoque que
+// src/Webview/win/Webview2Backend.cpp). Las conversiones ingenuas
+// byte-a-byte (std::wstring(s.begin(), s.end())) truncan/corrompen
+// cualquier carácter no-ASCII.
+std::wstring Utf8ToWide(std::string_view s) {
+    if (s.empty()) return std::wstring();
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()),
+                                nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
+
+std::string WideToUtf8(const wchar_t* w) {
+    if (!w) return std::string();
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    std::string s(n > 0 ? n - 1 : 0, '\0');
+    if (n > 0)
+        WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
 // mapa hwnd → Impl (los callbacks C no pueden capturar)
 std::map<HWND, Window::Impl*>& HwndMap() {
     static std::map<HWND, Window::Impl*> m;
@@ -53,16 +75,16 @@ LRESULT CALLBACK OwWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     switch (msg) {
     case WM_CLOSE: {
-        if (pdata) {
-            // veto nativo vía flag (closeRequestVeto); JS veto en F3
-            // el Impl vive junto a pdata; lo recuperamos del mapa global
-            if (auto* impl = ImplFromHwnd(hwnd)) {
-                impl->closeRequestVeto = false;
-                impl->FireEvent("closeRequested", "null");
-                if (impl->closeRequestVeto) return 0;
-            }
+        // F3.4: usa el flujo central (veto nativo -> aviso JS/SDK con
+        // requestId -> timeout de OW_CLOSE_TIMEOUT_MS -> destroy), igual que
+        // Linux (delete-event) y macOS (NSWindowWillCloseNotification). El
+        // cierre real de la ventana lo decide BeginCloseFlow (via
+        // RespondJsClose o el timer), así que aquí siempre bloqueamos el
+        // WM_CLOSE por defecto devolviendo 0.
+        if (auto* impl = ImplFromHwnd(hwnd)) {
+            impl->BeginCloseFlow();
         }
-        break;
+        return 0;
     }
     case WM_DESTROY: {
         if (auto* impl = ImplFromHwnd(hwnd))
@@ -149,7 +171,7 @@ bool Window::Impl::PCreate() {
                 (opts.resizable ? WS_MAXIMIZEBOX | WS_MINIMIZEBOX : 0);
     // Custom conserva el estilo completo: WM_NCCALCSIZE extiende el cliente.
 
-    std::wstring title(opts.title.begin(), opts.title.end()); // TODO-verify UTF-16
+    std::wstring title = Utf8ToWide(opts.title);
     HWND hwnd = CreateWindowExW(0, kOwWindowClass, title.c_str(), style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, opts.width, opts.height,
                                 nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -258,14 +280,14 @@ void Window::Impl::PCenter() {
 
 void Window::Impl::PSetTitle(const std::string& t) {
     if (!pdata) return;
-    std::wstring w(t.begin(), t.end()); // TODO-verify UTF-16
+    std::wstring w = Utf8ToWide(t);
     SetWindowTextW(pdata->hwnd, w.c_str());
 }
 std::string Window::Impl::PGetTitle() const {
     if (!pdata) return {};
     wchar_t buf[512]{};
     GetWindowTextW(pdata->hwnd, buf, 512);
-    return std::string(buf, buf + wcslen(buf)); // TODO-verify UTF-8
+    return WideToUtf8(buf);
 }
 
 void Window::Impl::PApplyTitleBar() {

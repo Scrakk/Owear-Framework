@@ -29,6 +29,40 @@ function scanModuleFunctions(cppPath) {
   return [...new Set(names)]
 }
 
+function renderTypeDeclarations(modules) {
+  const lines = []
+  lines.push('// generado por @owear/vite-plugin — no editar')
+  lines.push("declare module '@owear/native' {")
+  for (const [mod, fns] of Object.entries(modules)) {
+    const body = fns.map((fn) => `    ${fn}(...args: any[]): Promise<any>`).join('\n')
+    lines.push(`  export const ${mod}: {\n${body}\n  }`)
+  }
+  const defaultBody = Object.keys(modules)
+    .map((mod) => `    ${mod}: typeof ${mod}`)
+    .join('\n')
+  lines.push(`  const _default: {\n${defaultBody}\n  }`)
+  lines.push('  export default _default')
+  lines.push('}')
+  lines.push('')
+  lines.push("declare module 'virtual:@owear/native' {")
+  lines.push("  export * from '@owear/native'")
+  lines.push("  export { default } from '@owear/native'")
+  lines.push('}')
+  return lines.join('\n') + '\n'
+}
+
+function writeTypeDeclarations(modules, projectRoot) {
+  if (!Object.keys(modules).length) return
+  const srcDir = path.join(projectRoot, 'src')
+  const outDir = fs.existsSync(srcDir) ? srcDir : projectRoot
+  const outFile = path.join(outDir, 'owear-native.d.ts')
+  try {
+    fs.writeFileSync(outFile, renderTypeDeclarations(modules), 'utf8')
+  } catch {
+    /* noop: la generación de tipos es best-effort */
+  }
+}
+
 export default function owear(options = {}) {
   const nativeDir = options.nativeDir ?? path.join(process.cwd(), 'native')
 
@@ -49,6 +83,7 @@ export default function owear(options = {}) {
 
     configResolved() {
       refreshModules()
+      writeTypeDeclarations(modules, process.cwd())
       if (!Object.keys(modules).length) return
 
       // compila .owm antes de bundlear (dev y build)

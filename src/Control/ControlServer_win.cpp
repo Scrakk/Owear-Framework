@@ -6,17 +6,65 @@
 //
 #include "ControlServer.hpp"
 #include "../Core/Log.hpp"
+#include "ow/App.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #include <cstring>
+#include <thread>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace ow {
 
 namespace {
+
+// VERIFICAR-EN-WINDOWS: verificación mínima de "mismo usuario" para el pipe
+// de control. Impersona al cliente conectado, compara su SID de usuario con
+// el de este proceso, y revierte la impersonación. No se ha podido compilar
+// ni probar en Windows real; revisar con cuidado antes de confiar en esta
+// mitigación (en particular el manejo de errores de las APIs de tokens).
+bool ClientIsSameUser(HANDLE pipeHandle) {
+    if (!ImpersonateNamedPipeClient(pipeHandle)) {
+        log::Warn("control", "ImpersonateNamedPipeClient falló");
+        return false;
+    }
+
+    bool sameUser = false;
+    HANDLE clientToken = nullptr;
+    if (OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &clientToken)) {
+        DWORD clientNeeded = 0;
+        GetTokenInformation(clientToken, TokenUser, nullptr, 0, &clientNeeded);
+        std::vector<uint8_t> clientBuf(clientNeeded);
+        if (clientNeeded > 0 &&
+            GetTokenInformation(clientToken, TokenUser, clientBuf.data(),
+                                clientNeeded, &clientNeeded)) {
+            auto* clientUser = reinterpret_cast<TOKEN_USER*>(clientBuf.data());
+
+            HANDLE selfToken = nullptr;
+            if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &selfToken)) {
+                DWORD selfNeeded = 0;
+                GetTokenInformation(selfToken, TokenUser, nullptr, 0, &selfNeeded);
+                std::vector<uint8_t> selfBuf(selfNeeded);
+                if (selfNeeded > 0 &&
+                    GetTokenInformation(selfToken, TokenUser, selfBuf.data(),
+                                        selfNeeded, &selfNeeded)) {
+                    auto* selfUser = reinterpret_cast<TOKEN_USER*>(selfBuf.data());
+                    sameUser = EqualSid(clientUser->User.Sid, selfUser->User.Sid);
+                }
+                CloseHandle(selfToken);
+            }
+        }
+        CloseHandle(clientToken);
+    } else {
+        log::Warn("control", "OpenThreadToken falló al verificar el cliente del pipe");
+    }
+
+    RevertToSelf();
+    return sameUser;
+}
 
 class PipeServer final : public ControlServer {
 public:
@@ -80,6 +128,22 @@ private:
             GetLastError() != ERROR_PIPE_CONNECTED) {
             return;
         }
+
+        // Verificación mínima de seguridad: solo aceptamos clientes que
+        // corran con el mismo usuario que este proceso. VERIFICAR-EN-WINDOWS.
+        if (!ClientIsSameUser(pipe_)) {
+            log::Warn("control", "conexión rechazada: usuario del pipe no coincide");
+            DisconnectNamedPipe(pipe_);
+            if (running_) {
+                pipe_ = CreateNamedPipeA(
+                    socketPath_.c_str(),
+                    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                    4, 64 * 1024, 64 * 1024, 0, nullptr);
+            }
+            return;
+        }
+
         uint64_t id = nextClientId_++;
         clients_[id] = ClientBuf{pipe_, {}};
         activeHandle_ = pipe_;
@@ -95,8 +159,11 @@ private:
             while ((pos = acc.find('\n')) != std::string::npos) {
                 std::string line = acc.substr(0, pos);
                 acc.erase(0, pos + 1);
-                // las respuestas se envían desde este hilo vía PlatformSend
-                HandleLine(id, line);
+                // HWND/COM/WebView2 exigen tocar UI solo desde el hilo que los
+                // creó (el hilo principal): HandleLine (y HandleCommand, que
+                // manipula ventanas) se despacha al main loop. Este hilo
+                // lector queda dedicado exclusivamente a I/O del pipe.
+                App::Post([this, id, line] { HandleLine(id, line); });
             }
         }
         std::lock_guard lock(sendMu_);

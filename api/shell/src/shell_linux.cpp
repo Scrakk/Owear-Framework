@@ -33,7 +33,8 @@ static bool LaunchUri(const std::string& uri, std::string& err) {
 
 void openExternal(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty() ||
+        !parsed.value->AsArray()[0].IsString())
         return RespondError(res, "url requerida");
     std::string url = parsed.value->AsArray()[0].AsString();
     if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0 &&

@@ -14,6 +14,11 @@
 namespace fswatch {
 
 namespace {
+struct Ctx {
+    HANDLE dir = nullptr;
+    OVERLAPPED ov{};
+    std::vector<uint8_t> buffer = std::vector<uint8_t>(64 * 1024);
+};
 struct OverlappedCtx {
     OVERLAPPED ov{};
     std::vector<uint8_t> buffer = std::vector<uint8_t>(64 * 1024);
@@ -24,15 +29,14 @@ bool Start(int id, std::string& err) {
     Watcher* w = Get(id);
     if (!w) { err = "watcher inexistente"; return false; }
 
-    auto* ctx = new struct Ctx {
-        HANDLE dir;
-        OVERLAPPED ov;
-        std::vector<uint8_t> buffer;
-    }{ CreateFileA(w->path.c_str(), FILE_LIST_DIRECTORY,
-                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                   nullptr, OPEN_EXISTING,
-                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr),
-        {}, std::vector<uint8_t>(64 * 1024) };
+    auto* ctx = new Ctx{CreateFileA(w->path.c_str(), FILE_LIST_DIRECTORY,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE |
+                                        FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING,
+                                    FILE_FLAG_BACKUP_SEMANTICS |
+                                        FILE_FLAG_OVERLAPPED,
+                                    nullptr),
+                        {}, std::vector<uint8_t>(64 * 1024)};
 
     if (ctx->dir == INVALID_HANDLE_VALUE) {
         delete ctx;
@@ -43,7 +47,9 @@ bool Start(int id, std::string& err) {
     w->stop = false;
     w->thread = std::thread([id, ctx]() {
         DWORD bytes = 0;
-        while (auto* w = Get(id); w && !w->stop) {
+        while (true) {
+            Watcher* w = Get(id);
+            if (!w || w->stop) break;
             ResetEvent(ctx->ov.hEvent);
             BOOL ok = ReadDirectoryChangesW(
                 ctx->dir, ctx->buffer.data(),

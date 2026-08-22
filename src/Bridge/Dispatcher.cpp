@@ -33,10 +33,12 @@ void Dispatcher::Execute(uint32_t windowId, const std::string& module,
                          const std::string& fn, const ow_request_t* req,
                          ow_response_t* res) {
     const ow_fn_entry_t* entry = nullptr;
+    ErrorSink errSink;
     {
         std::lock_guard lock(mu_);
         auto it = fns_.find(module + "/" + fn);
         if (it != fns_.end()) entry = it->second;
+        errSink = err_;
     }
 
     res->status = 1;
@@ -47,9 +49,10 @@ void Dispatcher::Execute(uint32_t windowId, const std::string& module,
     res->bin_len = 0;
 
     if (!entry) {
-        static thread_local std::string msg =
-            "función desconocida: " + module + "/" + fn;
+        static thread_local std::string msg;
+        msg = "función desconocida: " + module + "/" + fn;
         res->error = msg.c_str();
+        if (errSink) errSink(msg);
         return;
     }
 
@@ -60,17 +63,21 @@ void Dispatcher::Execute(uint32_t windowId, const std::string& module,
     try {
         entry->fn(&r, res);
     } catch (const std::exception& e) {
-        static thread_local std::string msg = std::string("excepción en módulo: ") + e.what();
+        static thread_local std::string msg;
+        msg = std::string("excepción en módulo: ") + e.what();
         res->status = 2;
         res->error = msg.c_str();
         res->json = "null";
         res->json_len = 4;
+        if (errSink) errSink(msg);
     } catch (...) {
-        static thread_local std::string msg = "excepción desconocida en módulo";
+        static thread_local std::string msg;
+        msg = "excepción desconocida en módulo";
         res->status = 2;
         res->error = msg.c_str();
         res->json = "null";
         res->json_len = 4;
+        if (errSink) errSink(msg);
     }
 
     // Normaliza respuesta vacía

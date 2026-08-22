@@ -14,10 +14,10 @@
 #include "ow/Module.h"
 #include "ow/Shm.h"
 #include "ow_api.h"
+#include "updater_platform.hpp"
 
 #include <filesystem>
 #include <fstream>
-#include <unistd.h>
 
 namespace upd {
 
@@ -104,27 +104,17 @@ void downloadUpdate(const ow_request_t*, ow_response_t* res) {
 void installAndRelaunch(const ow_request_t*, ow_response_t* res) {
     if (g_downloaded.empty()) return RespondError(res, "downloadUpdate primero");
 
-    char exe[4096] = {};
-    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    if (n <= 0) return RespondError(res, "no se resolvió el exe actual");
-    exe[n] = 0;
-
-    std::error_code ec;
-    fs::rename(g_downloaded, exe, ec); // reemplazo atómico mismo filesystem
-    if (ec) {
-        // distinto filesystem → copiar+rename
-        fs::copy_file(g_downloaded, std::string(exe) + ".new",
-                      fs::copy_options::overwrite_existing, ec);
-        if (ec) return RespondError(res, "copiado falló");
-        fs::rename(std::string(exe) + ".new", exe, ec);
-        if (ec) return RespondError(res, "rename atómico falló");
-    }
-    fs::permissions(exe, fs::perms::owner_all | fs::perms::group_read |
-                             fs::perms::group_exec | fs::perms::others_read |
-                             fs::perms::others_exec, ec);
+    std::string exe = CurrentExePath();
+    if (exe.empty()) return RespondError(res, "no se resolvió el exe actual");
 
     RespondOk(res, "null");
-    execv(exe, nullptr); // relanza; solo retorna si falla
+    std::string err;
+    if (!ReplaceAndRelaunch(g_downloaded, exe, err)) {
+        // ya respondimos "ok" (el reemplazo pudo iniciar); registrar el fallo
+        // real de relanzamiento no tiene canal de vuelta aquí, pero al menos
+        // no dejamos un execv/relanzamiento silenciosamente indefinido.
+        RespondError(res, err);
+    }
 }
 
 } // namespace upd
