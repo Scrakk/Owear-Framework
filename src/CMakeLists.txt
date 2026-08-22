@@ -2,13 +2,21 @@
 # Selección de fuentes POR PLATAFORMA vía CMake (nunca #ifdef de features).
 # Cambiar los contratos en include/ow/ rompe las 3 plataformas aquí, en compile-time.
 
-find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 
 if(OW_PLATFORM STREQUAL "linux")
+    find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
     pkg_check_modules(WEBKIT REQUIRED webkit2gtk-4.1)
     pkg_check_modules(OPENSSL REQUIRED openssl)
     pkg_check_modules(GIO_UNIX REQUIRED gio-unix-2.0)
+elseif(OW_PLATFORM STREQUAL "mac")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(OPENSSL REQUIRED openssl)
+    pkg_check_modules(GLIB2 REQUIRED glib-2.0 gio-2.0)
+    enable_language(OBJCXX)
+    find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+    find_library(WEBKIT_FRAMEWORK WebKit REQUIRED)
 endif()
 
 find_package(ZLIB REQUIRED)
@@ -95,6 +103,15 @@ if(OW_PLATFORM STREQUAL "linux")
     target_link_directories(owear_core PUBLIC
         ${GTK3_LIBRARY_DIRS} ${WEBKIT_LIBRARY_DIRS})
     target_compile_options(owear_core PRIVATE -Wall -Wextra)
+endif()
+
+# ── macOS: OpenSSL (Http) + GLib (ControlServer) + Cocoa/WebKit (UI) ────────
+if(OW_PLATFORM STREQUAL "mac")
+    target_include_directories(owear_core PRIVATE
+        ${OPENSSL_INCLUDE_DIRS} ${GLIB2_INCLUDE_DIRS})
+    target_link_libraries(owear_core PUBLIC
+        ${OPENSSL_LIBRARIES} ${GLIB2_LIBRARIES}
+        ${COCOA_FRAMEWORK} ${WEBKIT_FRAMEWORK})
 endif()
 
 # ── Binario del runtime ──────────────────────────────────────────────────────
