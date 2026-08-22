@@ -61,7 +61,8 @@ bool Start(int id, std::string& err) {
 
     w->stop = false;
     w->thread = std::thread([id, kq, fds]() mutable {
-        while (auto* wl = Get(id); wl && !wl->stop) {
+        // init-statement solo existe en if/for: bucle for con re-check por tick
+        for (auto* wl = Get(id); wl && !wl->stop; wl = Get(id)) {
             struct kevent ev{};
             struct timespec ts{0, 200 * 1000 * 1000}; // 200 ms poll
             int n = kevent(kq, nullptr, 0, &ev, 1, &ts);

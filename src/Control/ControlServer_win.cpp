@@ -12,9 +12,10 @@
 #include <windows.h>
 
 #include <cstring>
-#include <thread>
 #include <map>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace ow {

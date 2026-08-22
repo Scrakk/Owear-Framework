@@ -15,6 +15,9 @@
 #include "ow/detail/minjson.hpp"
 
 #define WIN32_LEAN_AND_MEAN
+#ifndef UNICODE
+#define UNICODE // IDC_ARROW y macros de recurso expanden a la variante W
+#endif
 #include <windows.h>
 #include <windowsx.h>
 
@@ -88,7 +91,7 @@ LRESULT CALLBACK OwWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_DESTROY: {
         if (auto* impl = ImplFromHwnd(hwnd))
-            Impl::EmitPlatformEvent(impl, "closed");
+            Window::Impl::EmitPlatformEvent(impl, "closed");
         return 0;
     }
     case WM_SIZE: {
@@ -96,7 +99,7 @@ LRESULT CALLBACK OwWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             json::Object o;
             o.emplace_back("width", json::Value(static_cast<int64_t>(LOWORD(lp))));
             o.emplace_back("height", json::Value(static_cast<int64_t>(HIWORD(lp))));
-            Impl::EmitPlatformEvent(impl, "resize",
+            Window::Impl::EmitPlatformEvent(impl, "resize",
                                     json::Value(std::move(o)).Serialize());
         }
         break;
@@ -106,14 +109,14 @@ LRESULT CALLBACK OwWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             json::Object o;
             o.emplace_back("x", json::Value(static_cast<int64_t>(GET_X_LPARAM(lp))));
             o.emplace_back("y", json::Value(static_cast<int64_t>(GET_Y_LPARAM(lp))));
-            Impl::EmitPlatformEvent(impl, "move",
+            Window::Impl::EmitPlatformEvent(impl, "move",
                                     json::Value(std::move(o)).Serialize());
         }
         break;
     }
     case WM_ACTIVATE: {
         if (auto* impl = ImplFromHwnd(hwnd))
-            Impl::EmitPlatformEvent(impl, wp != WA_INACTIVE ? "focus" : "blur");
+            Window::Impl::EmitPlatformEvent(impl, wp != WA_INACTIVE ? "focus" : "blur");
         break;
     }
     case WM_NCCALCSIZE: {

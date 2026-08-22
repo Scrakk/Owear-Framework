@@ -139,7 +139,11 @@ bool ExtractTarGz(const std::filesystem::path& tarGz,
                   const std::filesystem::path& destDir,
                   std::string& error,
                   const std::function<void(const std::string&)>& onEntry) {
+#ifdef _WIN32
+    std::FILE* f = _wfopen(tarGz.c_str(), L"rb"); // path::c_str() es wchar_t*
+#else
     std::FILE* f = std::fopen(tarGz.c_str(), "rb");
+#endif
     if (!f) { error = "no se pudo abrir " + tarGz.string(); return false; }
 
     std::filesystem::create_directories(destDir);

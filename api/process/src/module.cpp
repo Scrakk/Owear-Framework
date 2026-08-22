@@ -11,6 +11,10 @@
 #include <csignal>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h> // ::close del master fd del PTY
+#endif
+
 // implementaciones por plataforma (namespace proc)
 namespace proc {
 long SpawnPipes(int* outId, const std::string& cmd,

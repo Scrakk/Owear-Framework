@@ -25,6 +25,7 @@
 #include <cstring>
 #include <mutex>
 #include <random>
+#include <string>
 #include <unordered_map>
 
 namespace ow::shm {
