@@ -66,10 +66,15 @@ elseif(OW_PLATFORM STREQUAL "win")
     list(APPEND OW_KERNEL_SOURCES
         Core/App_win.cpp
         Window/window_win.cpp
-        Webview/win/Webview2Backend.cpp
         Control/ControlServer_win.cpp
         Runtime/NodeManager_win.cpp
     )
+    if(OW_WITH_WEBVIEW2)
+        list(APPEND OW_KERNEL_SOURCES Webview/win/Webview2Backend.cpp)
+    else()
+        # Stub sin WebView2 SDK: CreateWebviewBackend() → nullptr con log claro.
+        list(APPEND OW_KERNEL_SOURCES Webview/win/Webview2Stub_win.cpp)
+    endif()
 elseif(OW_PLATFORM STREQUAL "mac")
     list(APPEND OW_KERNEL_SOURCES
         Core/App_mac.mm
