@@ -1,18 +1,8 @@
 // Copyright 2026 Owear Contributors
 // SPDX-License-Identifier: Apache-2.0
 //
-// src/Modules/fs/fs_module.cpp — módulo stock "fs".
-// Compilado builtin (vinculado al kernel) Y como .owm independiente.
-//
-// Funciones v1 (args = array JSON):
-//   readText(path)                    → string
-//   readFile(path)                    → {"b64": "..."}   (F3: handle SHM)
-//   writeFile(path, data, encoding?)  → null   (encoding: "utf8"|"base64")
-//   readDir(path)                     → [{name, type:"file"|"dir"|"other"}]
-//   stat(path)                        → {size, isFile, isDir, mtimeMs} | null
-//   mkdir(path, recursive?)           → null
-//   remove(path, recursive?)          → null
-//   exists(path)                      → bool
+// api/fs/src/basic.cpp — operaciones básicas de la API fs.
+//   readText readFile writeFile readDir stat mkdir remove exists
 //
 #include "ow/Base64.h"
 #include "ow/Json.h"
@@ -202,25 +192,66 @@ void exists(const ow_request_t* req, ow_response_t* res) {
     bool ok = fs::exists(path, ec);
     RespondOk(res, ok ? "true" : "false");
 }
-
-const ow_fn_entry_t kFns[] = {
-    {"readText", &readText},
-    {"readFile", &readFile},
-    {"writeFile", &writeFile},
-    {"readDir", &readDir},
-    {"stat", &statFn},
-    {"mkdir", &mkdirFn},
-    {"remove", &removeFn},
-    {"exists", &exists},
-};
-
 } // namespace fsimpl
 
-static const ow_module_desc_t kFsDesc{
-    "fs", "0.1.0", fsimpl::kFns, sizeof(fsimpl::kFns) / sizeof(fsimpl::kFns[0])};
+// ── tabla exportada ──
+namespace fsimpl {  // definidos en meta.cpp / watch.cpp
+extern void copy(const ow_request_t*, ow_response_t*);
+extern void renameFn(const ow_request_t*, ow_response_t*);
+extern void chmodFn(const ow_request_t*, ow_response_t*);
+extern void symlinkFn(const ow_request_t*, ow_response_t*);
+extern void readlinkFn(const ow_request_t*, ow_response_t*);
+extern void lstat(const ow_request_t*, ow_response_t*);
+extern void realpath(const ow_request_t*, ow_response_t*);
+extern void mkdtemp(const ow_request_t*, ow_response_t*);
+extern void accessFn(const ow_request_t*, ow_response_t*);
+extern void truncateFn(const ow_request_t*, ow_response_t*);
+extern void utimes(const ow_request_t*, ow_response_t*);
+extern void watch(const ow_request_t*, ow_response_t*);
+extern void unwatch(const ow_request_t*, ow_response_t*);
+} // namespace fsimpl
 
-OW_MODULE_EXPORT const ow_module_desc_t* ow_module_descriptor(void) { return &kFsDesc; }
+namespace fshandle { // handles.cpp
+extern void openFn(const ow_request_t*, ow_response_t*);
+extern void readFn(const ow_request_t*, ow_response_t*);
+extern void writeFn(const ow_request_t*, ow_response_t*);
+extern void sizeFn(const ow_request_t*, ow_response_t*);
+extern void closeFn(const ow_request_t*, ow_response_t*);
+} // namespace fshandle
 
-namespace ow::internal {
-const ow_module_desc_t* FsModuleDescriptor() { return &kFsDesc; }
-} // namespace ow::internal
+extern "C" OW_MODULE_EXPORT const ow_module_desc_t* ow_module_descriptor(void) {
+    static const ow_fn_entry_t fns[] = {
+        {"readText", &fsimpl::readText},
+        {"readFile", &fsimpl::readFile},
+        {"writeFile", &fsimpl::writeFile},
+        {"readDir", &fsimpl::readDir},
+        {"stat", &fsimpl::statFn},
+        {"mkdir", &fsimpl::mkdirFn},
+        {"remove", &fsimpl::removeFn},
+        {"exists", &fsimpl::exists},
+        // meta
+        {"copy", &fsimpl::copy},
+        {"rename", &fsimpl::renameFn},
+        {"chmod", &fsimpl::chmodFn},
+        {"symlink", &fsimpl::symlinkFn},
+        {"readlink", &fsimpl::readlinkFn},
+        {"lstat", &fsimpl::lstat},
+        {"realpath", &fsimpl::realpath},
+        {"mkdtemp", &fsimpl::mkdtemp},
+        {"access", &fsimpl::accessFn},
+        {"truncate", &fsimpl::truncateFn},
+        {"utimes", &fsimpl::utimes},
+        // handles
+        {"open", &fshandle::openFn},
+        {"read", &fshandle::readFn},
+        {"write", &fshandle::writeFn},
+        {"size", &fshandle::sizeFn},
+        {"close", &fshandle::closeFn},
+        // watch
+        {"watch", &fsimpl::watch},
+        {"unwatch", &fsimpl::unwatch},
+    };
+    static const ow_module_desc_t d{
+        "fs", OW_VERSION_STRING, fns, sizeof(fns) / sizeof(fns[0])};
+    return &d;
+}

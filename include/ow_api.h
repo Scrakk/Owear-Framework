@@ -3,17 +3,19 @@
 //
 // api/ow_api.h — ABI-C estable del sistema de módulos Owear (.owm).
 //
-// Este es el ÚNICO contrato entre el kernel y las shared libraries de módulos.
-// Estilo innerta_api.h: extern "C", structs planos, sin excepciones a través
-// del límite. Un módulo exporta exactamente un símbolo:
+// Cada API vive en su propio folder (api/fs, api/process, …) y compila a una
+// shared library independiente (.so/.dll/.dylib) que el kernel carga con
+// dlopen. Actualización modular por API.
 //
+// Un módulo exporta EXACTAMENTE un símbolo obligatorio:
 //     const ow_module_desc_t* ow_module_descriptor(void);
+// y opcionalmente recibe el host con:
+//     void ow_module_set_host(const ow_module_host_t* host);
 //
 // Contrato de memoria:
-//  - El host llama a la función con (req, res).
-//  - Los buffers apuntados por res deben permanecer válidos SOLO durante la
-//    llamada; el host copia inmediatamente después de que la función retorna.
-//  - La función NUNCA debe lanzar excepciones hacia el host (catch-all dentro).
+//  - Los buffers apuntados por res viven SOLO durante la llamada; el host
+//    copia inmediatamente después de retornar.
+//  - Prohibido lanzar excepciones hacia el host.
 //
 #pragma once
 
@@ -65,7 +67,7 @@ typedef struct ow_fn_entry {
 } ow_fn_entry_t;
 
 typedef struct ow_module_desc {
-    const char*          name;     ///< "fs", "dialog", "my-module"...
+    const char*          name;     ///< "fs", "process", "dialog", …
     const char*          version;
     const ow_fn_entry_t* fns;
     uint32_t             fn_count;
@@ -73,6 +75,28 @@ typedef struct ow_module_desc {
 
 /// Único símbolo que un .owm debe exportar.
 typedef const ow_module_desc_t* (*ow_module_entry_t)(void);
+
+// ── Host callbacks (F-infra) ────────────────────────────────────────────────
+// El kernel pasa esta tabla vía ow_module_set_host() justo después del dlopen.
+// Permite a los módulos emitir eventos (watchers, PTY stdout, tray clicks…).
+
+#define OW_HOST_ABI_VERSION 1
+
+typedef void (*ow_host_emit_event_t)(void* ctx, uint32_t window_id,
+                                     const char* name, const char* json);
+typedef void (*ow_host_log_t)(void* ctx, int level, const char* msg);
+
+typedef struct ow_module_host {
+    uint32_t version;              ///< OW_HOST_ABI_VERSION
+    void*    ctx;                  ///< contexto opaco del kernel
+    ow_host_emit_event_t emit_event;
+    ///<  window_id == 0 → broadcast (todas las ventanas + SDK por control socket)
+    ow_host_log_t log;             ///< level: 0 debug · 1 info · 2 warn · 3 error
+    void*    reserved[4];
+} ow_module_host_t;
+
+/// Opcional: el módulo guarda la tabla si quiere emitir eventos.
+typedef void (*ow_module_set_host_t)(const ow_module_host_t* host);
 
 #ifdef __cplusplus
 } // extern "C"

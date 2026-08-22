@@ -74,7 +74,8 @@ bool NodeManager::FetchIndex(std::vector<Release>& out, std::string& error) {
         Release r;
         if (const json::Value* v = e.Find("version"); v && v->IsString())
             r.version = v->AsString();
-        if (const json::Value* v = e.Find("lts"); v) r.lts = !v->IsNull() && v->AsBool();
+        if (const json::Value* v = e.Find("lts"); v)
+            r.lts = !v->IsNull(); // "lts" es codename string cuando aplica, null si no
         if (!r.version.empty()) out.push_back(std::move(r));
     }
     return !out.empty();
@@ -227,9 +228,13 @@ Result<fs::path> NodeManager::Ensure(const std::string& range) {
         return Result<fs::path>::Err(
             "extracción .zip pendiente en Windows (F3); usa Node del sistema");
     }
-    if (!archive::ExtractTarGz(tgzPath, CacheRoot(), error)) {
+    if (!archive::ExtractTarGz(tgzPath, CacheRoot(), error) || error.empty() == false) {
         fs::remove_all(target, ec);
-        return Result<fs::path>::Err(error);
+        return Result<fs::path>::Err(error.empty() ? "extracción fallida" : error);
+    }
+    if (!fs::exists(nodeBin, ec)) {
+        fs::remove_all(target, ec);
+        return Result<fs::path>::Err("extracción incompleta: falta " + nodeBin.string());
     }
     fs::permissions(nodeBin,
                     fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |

@@ -4,6 +4,15 @@
 
 #include "Log.hpp"
 #include "../Bridge/Dispatcher.hpp"
+#include "ow_api.h"
+#include "../Bridge/Shm.hpp"
+#include "../Control/ControlServer.hpp"
+#include "ow/App.h"
+#include "ow/Bridge/Codec.h"
+#include "ow/Window.h"
+#include "ow/detail/minjson.hpp"
+
+#include <map>
 
 #include <dlfcn.h>
 #include <unistd.h>
@@ -32,6 +41,54 @@ std::vector<std::filesystem::path> SplitPathList(const char* raw) {
 }
 } // namespace
 
+namespace {
+
+/// Emite un evento de módulo: window_id != 0 → a esa ventana;
+/// 0 → broadcast al SDK (control socket) y a todas las ventanas vivas.
+void HostEmitEvent(void*, uint32_t window_id, const char* name, const char* json) {
+    // Los módulos emiten desde hilos de fondo (watchers, PTY, pipes):
+    // TODO el trabajo con GTK/sockets se marshaling al main thread.
+    std::string payload = json && json[0] ? json : "null";
+    std::string evtName = name ? name : "";
+    App::Post([window_id, evtName = std::move(evtName), payload = std::move(payload)] {
+        using json::Value;
+
+        if (window_id != 0) {
+            auto it = LiveWindows().find(window_id);
+            if (it != LiveWindows().end()) it->second->EmitToJS(evtName, payload);
+            return;
+        }
+
+        json::Object params;
+        params.emplace_back("name", Value(evtName));
+        {
+            auto parsed = json::Parse(payload);
+            params.emplace_back("payload",
+                                parsed.value ? std::move(*parsed.value) : Value(nullptr));
+        }
+        ControlServer::Get().BroadcastEvent("module.event",
+                                            Value(std::move(params)).Serialize());
+        for (auto& [id, w] : LiveWindows()) w->EmitToJS(evtName, payload);
+    });
+}
+
+void HostLog(void*, int level, const char* msg) {
+    using L = log::Level;
+    L l = level <= 0 ? L::Debug : level == 1 ? L::Info : level == 2 ? L::Warn : L::Error;
+    log::Write(l, "module", msg ? msg : "");
+}
+
+ow_module_host_t MakeHost() {
+    ow_module_host_t h{};
+    h.version = OW_HOST_ABI_VERSION;
+    h.ctx = nullptr;
+    h.emit_event = &HostEmitEvent;
+    h.log = &HostLog;
+    return h;
+}
+const ow_module_host_t g_host = MakeHost();
+} // namespace
+
 std::vector<std::filesystem::path> ModuleLoader::SearchPaths() {
     std::vector<std::filesystem::path> paths = SplitPathList(std::getenv("OW_MODULES_DIR"));
     char exeBuf[4096] = {};
@@ -58,6 +115,11 @@ size_t ModuleLoader::LoadFile(const std::filesystem::path& file) {
         log::Error("loader", file.string() + ": símbolo ow_module_descriptor ausente");
         dlclose(handle);
         return 0;
+    }
+    // host callbacks (emit_event/log) — opcional para el módulo
+    if (auto setHost = reinterpret_cast<ow_module_set_host_t>(
+            dlsym(handle, "ow_module_set_host")); setHost) {
+        setHost(&g_host);
     }
     const ow_module_desc_t* desc = entry();
     size_t count = Dispatcher::Get().RegisterModule(desc, file.filename().string());

@@ -36,12 +36,10 @@ void App::Quit(int exitCode) {
 namespace internal {
 
 // Definidos en Modules/fs/fs_module.cpp y Core/WindowModule.cpp.
-const ow_module_desc_t* FsModuleDescriptor();
 const ow_module_desc_t* WindowModuleDescriptorImpl();
 
 void RegisterBuiltinModules() {
     Dispatcher::Get().RegisterModule(WindowModuleDescriptorImpl(), "builtin:ow-window");
-    Dispatcher::Get().RegisterModule(FsModuleDescriptor(), "builtin:fs");
 }
 
 bool Bootstrap(int argc, char** argv, const AppOptions& options) {

@@ -33,6 +33,9 @@ message(STATUS "Owear platform: ${OW_PLATFORM}")
 
 add_subdirectory(src)
 
+# ── Todas las APIs (cada folder api/<nombre> = una API modular .owm) ─────────
+add_subdirectory(api)
+
 if(OW_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

@@ -32,14 +32,21 @@ struct Url {
     std::string host;
     std::string port = "443";
     std::string path = "/";
+    bool tls = true;
 };
 
 bool ParseUrl(const std::string& url, Url& out, std::string& error) {
     auto schemeEnd = url.find("://");
-    if (schemeEnd == std::string::npos || url.compare(0, schemeEnd, "https") != 0) {
-        error = "solo se soporta https://" ;
+    if (schemeEnd == std::string::npos) {
+        error = "URL sin scheme";
         return false;
     }
+    out.tls = url.compare(0, schemeEnd, "https") == 0;
+    if (!out.tls && url.compare(0, schemeEnd, "http") != 0) {
+        error = "solo se soporta http(s)";
+        return false;
+    }
+    if (!out.tls) out.port = "80";
     std::string rest = url.substr(schemeEnd + 3);
     auto pathStart = rest.find('/');
     std::string authority = pathStart == std::string::npos ? rest : rest.substr(0, pathStart);
@@ -59,8 +66,7 @@ class TlsConnection {
 public:
     ~TlsConnection() {
         if (ssl_) SSL_free(ssl_);
-        if (ctx_) SSL_CTX_free(ctx_);
-        if (fd_ >= 0) ::close(fd_);
+        // ctx_ es singleton del proceso (compartido) — NUNCA se libera aquí
     }
 
     bool Connect(const Url& url, std::string& error) {
@@ -174,23 +180,65 @@ bool ParseHeaders(const std::string& head, Response& r) {
     return r.status > 0;
 }
 
-bool RequestOnce(const Url& url, Response& resp, std::string& error) {
-    TlsConnection conn;
-    if (!conn.Connect(url, error)) return false;
+class PlainConnection {
+public:
+    bool Connect(const Url& url, std::string& error) {
+        addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* res = nullptr;
+        if (::getaddrinfo(url.host.c_str(), url.port.c_str(), &hints, &res) != 0 || !res) {
+            error = "DNS falló";
+            return false;
+        }
+        for (addrinfo* p = res; p; p = p->ai_next) {
+            fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+            if (fd_ < 0) continue;
+            if (::connect(fd_, p->ai_addr, p->ai_addrlen) == 0) break;
+            ::close(fd_);
+            fd_ = -1;
+        }
+        freeaddrinfo(res);
+        if (fd_ < 0) { error = "connect falló"; return false; }
+        return true;
+    }
+    bool SendAll(const void* d, size_t l) const {
+        const char* p = static_cast<const char*>(d);
+        while (l > 0) {
+            ssize_t n = ::write(fd_, p, l);
+            if (n <= 0) return false;
+            p += n; l -= static_cast<size_t>(n);
+        }
+        return true;
+    }
+    bool ReadAll(std::string& out) const {
+        char buf[16384];
+        ssize_t n;
+        while ((n = ::read(fd_, buf, sizeof(buf))) > 0) out.append(buf, static_cast<size_t>(n));
+        return true;
+    }
+    ~PlainConnection() { if (fd_ >= 0) ::close(fd_); }
+private:
+    int fd_ = -1;
+};
 
+bool RequestOnce(const Url& url, Response& resp, std::string& error) {
     std::string req = "GET " + url.path +
                       " HTTP/1.1\r\nHost: " + url.host +
                       "\r\nUser-Agent: owear/0.1 (+https://owear.dev)\r\n"
                       "Accept: */*\r\nConnection: close\r\n\r\n";
-    if (!conn.SendAll(req.data(), req.size())) {
-        error = "envío falló";
-        return false;
-    }
-
     std::string all;
-    if (!conn.ReadAll(all)) {
-        error = "lectura falló";
-        return false;
+
+    if (url.tls) {
+        TlsConnection conn;
+        if (!conn.Connect(url, error)) return false;
+        if (!conn.SendAll(req.data(), req.size())) { error = "envío falló"; return false; }
+        if (!conn.ReadAll(all)) { error = "lectura falló"; return false; }
+    } else {
+        PlainConnection conn;
+        if (!conn.Connect(url, error)) return false;
+        if (!conn.SendAll(req.data(), req.size())) { error = "envío falló"; return false; }
+        if (!conn.ReadAll(all)) { error = "lectura falló"; return false; }
     }
 
     auto sep = all.find("\r\n\r\n");
@@ -207,7 +255,6 @@ bool RequestOnce(const Url& url, Response& resp, std::string& error) {
     auto itChunked = resp.headers.find("transfer-encoding");
     if (itChunked != resp.headers.end() &&
         itChunked->second.find("chunked") != std::string::npos) {
-        // decode chunked
         size_t pos = 0;
         while (pos < body.size()) {
             auto eol = body.find("\r\n", pos);
@@ -215,10 +262,7 @@ bool RequestOnce(const Url& url, Response& resp, std::string& error) {
             uint64_t sz = std::strtoull(body.substr(pos, eol - pos).c_str(), nullptr, 16);
             if (sz == 0) break;
             size_t dataStart = eol + 2;
-            if (dataStart + sz > body.size()) {
-                error = "chunked truncado";
-                return false;
-            }
+            if (dataStart + sz > body.size()) { error = "chunked truncado"; return false; }
             resp.body.append(body, dataStart, static_cast<size_t>(sz));
             pos = dataStart + sz + 2;
         }

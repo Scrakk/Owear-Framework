@@ -164,10 +164,13 @@ bool ExtractTarGz(const std::filesystem::path& tarGz,
     std::string longName;
     bool pendingLong = false;
     bool sawEnd = false;
+    bool archiveEnded = false;
     bool ok = true;
 
     auto feed = [&](const uint8_t* p, size_t n) -> bool {
         while (n > 0) {
+            if (archiveEnded) return true; // padding/trailing garbage tras el fin
+
             if (!inData) {
                 size_t need = kBlock - hdrFill;
                 size_t take = need < n ? need : n;
@@ -179,7 +182,11 @@ bool ExtractTarGz(const std::filesystem::path& tarGz,
 
                 hdrFill = 0;
                 if (IsZeroBlock(hdr)) {
-                    if (sawEnd) return false; // fin real
+                    if (sawEnd) {
+                        // dos bloques cero seguidos = fin LEGÍTIMO del archivo
+                        archiveEnded = true;
+                        return true;
+                    }
                     sawEnd = true;
                     continue;
                 }

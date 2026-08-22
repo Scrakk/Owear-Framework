@@ -19,7 +19,6 @@ set(OW_KERNEL_SOURCES
     Core/Log.cpp
     Core/ModuleLoader.cpp
     Core/WindowModule.cpp
-    Modules/fs/fs_module.cpp
     Bridge/Codec.cpp
     Bridge/BridgeScript.cpp
     Bridge/Dispatcher.cpp
@@ -76,11 +75,6 @@ if(OW_PLATFORM STREQUAL "linux")
     target_link_directories(owear_core PUBLIC
         ${GTK3_LIBRARY_DIRS} ${WEBKIT_LIBRARY_DIRS})
     target_compile_options(owear_core PRIVATE -Wall -Wextra)
-endif()
-
-# ── Módulos stock (.owm) ─────────────────────────────────────────────────────
-if(OW_BUILD_MODULES)
-    add_subdirectory(Modules)
 endif()
 
 # ── Binario del runtime ──────────────────────────────────────────────────────

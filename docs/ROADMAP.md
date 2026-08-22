@@ -49,3 +49,31 @@ completas pendientes de verificación en su SO destino).
 
 ## F5 — Port de Scrakk Studio
 Reservado al autor.
+
+---
+
+# APIs modulares (api/<nombre>) — F6/F7/F8/F9 ✅ Linux
+
+Estructura: cada API vive en `api/<nombre>/` y compila a `.owm` independiente
+(actualización modular). 13 módulos + builtin ow-window cargando y verificados
+E2E en Linux (19/19 pruebas en verde).
+
+| API | Estado Linux | Win/Mac |
+|---|---|---|
+| fs (v2: handles fd-style, copy/rename/chmod/symlink/lstat/realpath/mkdtemp/access/truncate, **watch** inotify) | ✅ E2E | watch: ReadDirectoryChangesW/kqueue — VERIFICAR |
+| process (**PTY Manager real** forkpty + spawn pipes + exit/stdout eventos) | ✅ E2E (bash interactivo) | ConPTY — VERIFICAR |
+| path (join/resolve/dirname/basename/extname/normalize + dirs XDG/Known Folders) | ✅ E2E | Known Folders — VERIFICAR |
+| dialog (GtkFileChooserNative / IFileDialog / NSPanel) | ✅ registrado (modal no automatizable) | VERIFICAR |
+| clipboard (texto + imagen PNG→SHM) | ✅ E2E texto | WIC pendiente |
+| screen (monitores/workarea/scale/cursor) | ✅ E2E | VERIFICAR |
+| net (HTTP(S) nativo sin CORS + download SHA256; respuestas ≥256KB → SHM) | ✅ E2E | mismo código |
+| notification (sistema: org.freedesktop.Notifications) | ✅ E2E (id real) | toast/UNUser — pendiente |
+| power (logind sleep/resume + ScreenSaver inhibit) | ✅ E2E | PowerBroadcast — pendiente |
+| shell (openExternal/openPath/showItemInFolder via FileManager1 D-Bus) | ✅ validación+launch | IShellLink — VERIFICAR |
+| updater (manifest+semver+sha256+replace atómico+execv relaunch) | ✅ E2E check/download | igual |
+| menu (popup JSON declarativo opcional; setApplicationMenu noop en Linux por diseño) | ✅ | NSMenu/HMENU — pendiente |
+| globalshortcut (X11 XGrabKey; **opcional**, Wayland no soportado) | ✅ registrado | RegisterHotKey — pendiente |
+| tray (libayatana-appindicator — requiere `libayatana-appindicator3-dev`) | ⏸ omitida sin deps | Shell_NotifyIcon/NSStatusItem — pendiente |
+
+Pendientes siguientes: session/cookies/downloads (kernel-coupled), window-extras
+(devtools/capturePage/printToPDF), capturer (X11→PNG→SHM), crashreporter.
