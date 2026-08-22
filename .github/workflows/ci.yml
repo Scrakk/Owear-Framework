@@ -36,7 +36,8 @@ jobs:
             setsid ./build/linux-release/src/owear > /tmp/owear-e2e.log 2>&1 &
           sleep 5
           timeout 150 python3 tests/e2e/run_suites.py \
-            --pages all.html builtins.html --port 8123
+            --pages all.html builtins.html --port 8123 || \
+          { echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::"; exit 1; }
 
   windows:
     name: Windows · compile (MSVC + vcpkg zlib/openssl)

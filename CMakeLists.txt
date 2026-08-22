@@ -31,6 +31,10 @@ else()
 endif()
 message(STATUS "Owear platform: ${OW_PLATFORM}")
 
+if(APPLE)
+    enable_language(OBJCXX) # los .mm del kernel (window/webview/control)
+endif()
+
 add_subdirectory(src)
 
 # ── Todas las APIs (cada folder api/<nombre> = una API modular .owm) ─────────

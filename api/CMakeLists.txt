@@ -30,8 +30,13 @@ function(ow_add_module NAME)
     target_include_directories(owear-api-${NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${ARG_INCLUDES})
-    target_compile_options(owear-api-${NAME} PRIVATE
-        ${OW_API_COMMON_FLAGS} -Wall -Wextra)
+    if(MSVC)
+        target_compile_options(owear-api-${NAME} PRIVATE
+            ${OW_API_COMMON_FLAGS} /W4)
+    else()
+        target_compile_options(owear-api-${NAME} PRIVATE
+            ${OW_API_COMMON_FLAGS} -Wall -Wextra)
+    endif()
     target_link_libraries(owear-api-${NAME} PRIVATE ${ARG_LIBS})
     set_target_properties(owear-api-${NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME "${NAME}")
