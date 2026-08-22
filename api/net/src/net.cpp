@@ -6,6 +6,8 @@
 //
 #include "Runtime/Http.hpp"
 #include "Runtime/Sha256.hpp"
+
+#include <algorithm>
 #include "ow/Base64.h"
 #include "ow/Json.h"
 #include "ow/Module.h"
@@ -26,34 +28,59 @@ using ow::Module::RespondError;
 using ow::Module::RespondOk;
 
 // args: [ {method, url, headers{}, body?, bodyB64?, timeoutMs?} ]
+// → {status, headers{minúsculas}, body(string) | __ow_shm}
 void request(const ow_request_t* req, ow_response_t* res) {
     auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
-    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsObject())
+    if (!parsed.value || !parsed.value->IsArray() ||
+        !parsed.value->AsArray()[0].IsObject())
         return RespondError(res, "objeto {method,url,...} requerido");
     const auto& o = parsed.value->AsArray()[0];
 
-    std::string method = "GET", url;
-    if (const Value* v = o.Find("method"); v && v->IsString()) method = v->AsString();
-    if (const Value* v = o.Find("url"); v && v->IsString()) url = v->AsString();
-    if (url.empty()) return RespondError(res, "url requerida");
-    if (method != "GET") return RespondError(res, "v1 solo GET (POST con streams en F-next)");
+    auto str = [&](const char* k) -> std::string {
+        const Value* v = o.Find(k);
+        return v && v->IsString() ? v->AsString() : "";
+    };
 
-    std::string body, err;
-    if (!ow::http::DownloadToString(url, body, err)) return RespondError(res, err);
+    ow::http::Request r(str("method").empty() ? "GET" : str("method"), str("url"));
+    if (r.url.empty()) return RespondError(res, "url requerida");
+
+    if (const Value* h = o.Find("headers"); h && h->IsObject())
+        for (const auto& [k, v] : h->AsObject())
+            if (v.IsString()) r.header(k, v.AsString());
+
+    std::string bytes;
+    if (const Value* b = o.Find("body"); b && b->IsString()) bytes = b->AsString();
+    else if (const Value* b = o.Find("bodyB64"); b && b->IsString()) {
+        if (!ow::b64::Decode(b->AsString(), bytes))
+            return RespondError(res, "bodyB64 inválido");
+    }
+    if (!bytes.empty()) r.body(std::move(bytes));
+
+    int timeoutSecs = 30;
+    if (const Value* v = o.Find("timeoutMs"); v && v->IsNumber())
+        timeoutSecs = std::max(1, static_cast<int>(v->AsInt() / 1000));
+    r.timeout(timeoutSecs);
+
+    std::string err;
+    auto resp = ow::http::Perform(r, err);
+    if (!err.empty()) return RespondError(res, err);
 
     Object out;
-    out.emplace_back("status", Value(static_cast<int64_t>(200)));
+    out.emplace_back("status", Value(static_cast<int64_t>(resp.status)));
+    Object hdrs;
+    for (auto& [k, v] : resp.headers) hdrs.emplace_back(k, Value(v));
+    out.emplace_back("headers", Value(std::move(hdrs)));
 
-    // cuerpo: SHM si grande, texto si no
-    if (body.size() >= 256 * 1024) {
-        const char* id = ow_shm_put(reinterpret_cast<const uint8_t*>(body.data()),
-                                    body.size());
+    if (resp.body.size() >= 256 * 1024) {
+        const char* id =
+            ow_shm_put(reinterpret_cast<const uint8_t*>(resp.body.data()),
+                       resp.body.size());
         Object shm;
-        shm.emplace_back("id", Value(std::string(id ?: "")));
-        shm.emplace_back("size", Value(static_cast<int64_t>(body.size())));
+        shm.emplace_back("id", Value(std::string(id ? id : "")));
+        shm.emplace_back("size", Value(static_cast<int64_t>(resp.body.size())));
         out.emplace_back("body", Value(std::move(shm)));
     } else {
-        out.emplace_back("body", Value(std::move(body)));
+        out.emplace_back("body", Value(std::move(resp.body)));
     }
     RespondOk(res, Value(std::move(out)).Serialize().c_str());
 }

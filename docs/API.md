@@ -13,6 +13,8 @@ ow.invokeSync(module: string, fn: string, ...args): unknown        // ⚠️ blo
 ow.readShared(handle: { id: string; size: number }): Promise<ArrayBuffer>
 ow.on(name: string, cb: (payload: unknown) => void): () => void    // devuelve unsubscribe
 ow.emit(name: string, payload?: unknown): void                     // JS → nativo + listeners JS
+ow.emitTo(targetWindowId, name, payload?)                          // IPC dirigido ventana→ventana
+ow.findInPage(text, opts?): { matches, active }                    // helper JS (window.find)
 window.__owWindowId: number                                        // id de la ventana actual
 ```
 
@@ -62,6 +64,16 @@ window.flashFrame(windowId, bool)              // urgencia taskbar/dock
 window.setIcon(windowId, pngB64)
 window.setUserAgent(windowId, ua)
 window.zoom(windowId, factor)                  // 1.0 = 100%
+
+// ── navegación (F-next) ──
+window.reload(windowId); window.stop(windowId)
+window.goBack(windowId); window.goForward(windowId)
+window.canGoBack(windowId); window.canGoForward(windowId)
+window.getURL(windowId) → string; window.getTitle(windowId) → string
+window.findInPage(windowId, text, {matchCase?, backwards?}?) → {matches, active}
+window.findStop(windowId)
+// eventos por ventana (vía SDK): navigationStarted · loadCommitted ·
+// didFinishLoad · didFailLoad{url,code,description} · pageTitleUpdated{title}
 ```
 
 ## 2.3 `session` (builtin — cookies/cache/proxy/downloads)
@@ -78,6 +90,8 @@ session.downloadCancel(downloadId)
 // eventos: session.downloadStarted{downloadId,destination}
 //          session.downloadProgress{downloadId,progress 0..1}
 //          session.downloadFinished{downloadId}
+session.setUserAgentAll(ua)                    // aplica a todas las ventanas vivas
+session.spellCheck(windowId, lang1, lang2…)    // sin langs = off
 ```
 
 ## 2.4 `crashreporter` (builtin)
@@ -87,7 +101,25 @@ crashreporter.install() → crashDir     // SIGSEGV/ABRT/FPE/BUS/ILL → log+bac
 crashreporter.lastCrashLog() → string | null
 ```
 
-## 2.5 `capturer` (.owm — X11 v1)
+### net.request completo
+
+```ts
+net.request({ method:'GET'|'POST'|'PUT'|'DELETE', url,
+              headers?: {k:v}, body?: string, bodyB64?: string,
+              timeoutMs?: number })
+  → { status, headers:{minúsculas}, body:string|__ow_shm(≥256KB) }
+```
+
+## 2.5 `app` (builtin)
+
+```ts
+app.setBadgeCount(n)              // Unity launcher; otros DE → error claro
+app.requestSingleInstanceLock() → bool   // false = ya hay instancia (envía argv
+                                         // y emite 'secondInstance' en la 1ª)
+app.relaunch()                    // execv del propio binario
+```
+
+## 2.6 `capturer` (.owm — X11 v1)
 
 ```ts
 capturer.getSources() → [{type:'screen', id, name, bounds, thumbnail:{id,size}}]

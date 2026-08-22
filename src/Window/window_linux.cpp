@@ -14,6 +14,7 @@
 #include "ow/detail/minjson.hpp"
 
 #include <gtk/gtk.h>
+#include <webkit2/webkit2.h>
 
 #include <atomic>
 #include <cstdlib>
@@ -111,6 +112,52 @@ bool Window::Impl::PCreate() {
     gtk_widget_show_all(win);
 
     if (!webview->Create(win, opts.webviewArgs)) return false;
+
+    // ── eventos de navegación (siempre activos) ────────────────────────
+    GtkWidget* view = GTK_WIDGET(webview->NativeWidget());
+    if (WEBKIT_IS_WEB_VIEW(view)) {
+        g_signal_connect(view, "load-changed",
+            G_CALLBACK(+[](WebKitWebView* v, WebKitLoadEvent ev, gpointer ud) {
+                auto* impl = static_cast<Window::Impl*>(ud);
+                const char* name = nullptr;
+                switch (ev) {
+                case WEBKIT_LOAD_STARTED: name = "navigationStarted"; break;
+                case WEBKIT_LOAD_COMMITTED: name = "loadCommitted"; break;
+                case WEBKIT_LOAD_FINISHED: name = "didFinishLoad"; break;
+                default: return;
+                }
+                if (ev == WEBKIT_LOAD_STARTED) {
+                    const gchar* u = webkit_web_view_get_uri(v);
+                    log::Debug("nav", std::string("STARTED: ") + (u ? u : "?"));
+                }
+                Window::Impl::EmitPlatformEvent(impl, name);
+            }), this);
+        g_signal_connect(view, "load-failed",
+            G_CALLBACK(+[](WebKitWebView* v, WebKitLoadEvent, gchar* failing_uri,
+                           GError* err, gpointer ud) -> gboolean {
+                auto* impl = static_cast<Window::Impl*>(ud);
+                json::Object o;
+                o.emplace_back("url", json::Value(std::string(
+                                          failing_uri ? failing_uri : "")));
+                o.emplace_back("code",
+                               json::Value(static_cast<int64_t>(err ? err->code : 0)));
+                o.emplace_back("description", json::Value(std::string(
+                                                  err ? err->message : "")));
+                Window::Impl::EmitPlatformEvent(impl, "didFailLoad",
+                    json::Value(std::move(o)).Serialize());
+                return FALSE; // deja que WebKit muestre su página de error
+            }), this);
+        g_object_bind_property(view, "title", win, "title", G_BINDING_DEFAULT);
+        g_signal_connect(view, "notify::title",
+            G_CALLBACK(+[](WebKitWebView* v, GParamSpec*, gpointer ud) {
+                auto* impl = static_cast<Window::Impl*>(ud);
+                const gchar* t = webkit_web_view_get_title(v);
+                json::Object o;
+                o.emplace_back("title", json::Value(std::string(t ? t : "")));
+                Window::Impl::EmitPlatformEvent(impl, "pageTitleUpdated",
+                    json::Value(std::move(o)).Serialize());
+            }), this);
+    }
 
     // scheme app:// → sirve archivos del directorio de assets si existe
     const char* assetsDir = std::getenv("OW_ASSETS_DIR");

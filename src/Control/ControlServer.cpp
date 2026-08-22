@@ -96,6 +96,12 @@ void ControlServer::WireWindowEvents(WindowId id, Window* w) {
     w->On("unmaximize", forward("unmaximize"));
     w->On("enterFullScreen", forward("enterFullScreen"));
     w->On("leaveFullScreen", forward("leaveFullScreen"));
+    // navegación (F-next)
+    w->On("navigationStarted", forward("navigationStarted"));
+    w->On("loadCommitted", forward("loadCommitted"));
+    w->On("didFinishLoad", forward("didFinishLoad"));
+    w->On("didFailLoad", forward("didFailLoad"));
+    w->On("pageTitleUpdated", forward("pageTitleUpdated"));
     // F3.4: closeRequested se reenvía al SDK con requestId; el kernel
     // decide con window.respondCloseRequest o el timeout de 300 ms.
     w->On("closed", [this, id](std::string_view) {

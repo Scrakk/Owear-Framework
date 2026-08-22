@@ -84,5 +84,18 @@ E2E en Linux (19/19 pruebas en verde).
 | capturer (getSources thumbnails + captureScreen full → SHM PNG; **X11-only**, Wayland = error documentado) | ✅ E2E bajo Xvfb |
 | crashreporter (señales + backtrace a cache/crashes/) | ✅ registrado |
 
-Total: **18 módulos** (14 .owm dinámicos + 4 builtins kernel), 32 pruebas E2E
-en verde sobre Linux (19 all.html + 13 builtins.html bajo Xvfb).
+Total: **19 módulos** (15 .owm + 4+1 builtins), 32 pruebas E2E base en verde
++ ronda F-next verificada:
+
+| Extra F-next | Estado |
+|---|---|
+| Navegación (reload/stop/goBack/goForward/canGo*/getURL/getTitle + eventos navigationStarted/loadCommitted/didFinishLoad/didFailLoad/pageTitleUpdated al SDK) | ✅ E2E |
+| findInPage/findStop (FindController nativo + helper JS window.find; ⚠ WebKitGTK find degradado bajo Xvfb/software-rendering — VERIFICAR-EN-DESKTOP-REAL) | ⚠ estructural |
+| net.request completo (POST/PUT/headers/body/timeoutMs; respuestas ≥256KB → SHM) | ✅ E2E POST echo |
+| IPC dirigido ow.emitTo(windowId) ventana→ventana | ✅ E2E self+A→B |
+| app.setBadgeCount (Unity) / requestSingleInstanceLock (socket probe + handoff argv + evento secondInstance) / relaunch (execv) | ✅ registrado |
+| session.setUserAgentAll + spellCheck (por contexto) | ✅ registrado |
+| capturer bajo Xvfb/X11 | ✅ PNG 1280×800 |
+
+Pendiente menor: printToPDF (sin API directa en WebKitGTK v2.52), tray menús,
+webRequest interceptor, Wayland capture (portal).

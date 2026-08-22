@@ -34,6 +34,23 @@ bool DecodeMessage(std::string_view text, Message& out) {
     out.method.clear();
     out.name.clear();
 
+    uint64_t to = 0;
+    getU64("to", to);
+    out.to = static_cast<WindowId>(to);
+
+    if (type == "event") {
+        out.type = MsgType::Event;
+        uint64_t w = 0;
+        getU64("w", w);
+        out.window = static_cast<WindowId>(w);
+        getStr("n", out.name);
+        if (const json::Value* p = parsed.value->Find("p"); p)
+            out.json = p->Serialize();
+        else
+            out.json = "null";
+        return !out.name.empty();
+    }
+
     if (type == "invoke") {
         out.type = MsgType::Invoke;
         uint64_t id = 0;

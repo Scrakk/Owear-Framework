@@ -21,7 +21,8 @@ enum class MsgType : uint8_t { Invoke, InvokeResult, Event };
 struct Message {
     MsgType type = MsgType::Invoke;
     uint64_t id = 0;          // correlación invoke/result
-    WindowId window = 0;      // ventana invocante / destinataria
+    WindowId window = 0;      // ventana invocante
+    WindowId to = 0;          // evento dirigido (0 = broadcast)
     std::string module;
     std::string method;
     std::string name;         // evento

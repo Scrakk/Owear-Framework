@@ -41,12 +41,14 @@ const ow_module_desc_t* WindowModuleDescriptorImpl();
 const ow_module_desc_t* WindowExtrasDescriptor();
 const ow_module_desc_t* SessionDescriptor();
 const ow_module_desc_t* CrashReporterDescriptor();
+const ow_module_desc_t* AppModuleDescriptor();      // en api/app/
 
 void RegisterBuiltinModules() {
     Dispatcher::Get().RegisterModule(WindowModuleDescriptorImpl(), "builtin:ow-window");
     Dispatcher::Get().RegisterModule(WindowExtrasDescriptor(), "builtin:window");
     Dispatcher::Get().RegisterModule(SessionDescriptor(), "builtin:session");
     Dispatcher::Get().RegisterModule(CrashReporterDescriptor(), "builtin:crashreporter");
+    Dispatcher::Get().RegisterModule(AppModuleDescriptor(), "builtin:app");
 }
 
 bool Bootstrap(int argc, char** argv, const AppOptions& options) {

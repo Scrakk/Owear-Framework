@@ -206,6 +206,150 @@ void zoom(const ow_request_t* req, ow_response_t* res) {
     RespondOk(res, "null");
 }
 
+// ── navegación + findInPage (F-next) ────────────────────────────────────────
+
+void reload(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    NEED_WIN(id)
+    webkit_web_view_reload(view);
+    RespondOk(res, "null");
+}
+
+void stop(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    NEED_WIN(id)
+    webkit_web_view_stop_loading(view);
+    RespondOk(res, "null");
+}
+
+void goBack(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    NEED_WIN(id)
+    webkit_web_view_go_back(view);
+    RespondOk(res, "null");
+}
+
+void goForward(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    NEED_WIN(id)
+    webkit_web_view_go_forward(view);
+    RespondOk(res, "null");
+}
+
+void canGoBack(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    if (!ow::builtin::WebviewById(id)) return RespondError(res, "ventana no encontrada");
+    RespondOk(res, webkit_web_view_can_go_back(
+                       static_cast<WebKitWebView*>(ow::builtin::WebviewById(id)))
+                       ? "true" : "false");
+}
+
+void canGoForward(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    if (!ow::builtin::WebviewById(id)) return RespondError(res, "ventana no encontrada");
+    RespondOk(res, webkit_web_view_can_go_forward(
+                       static_cast<WebKitWebView*>(ow::builtin::WebviewById(id)))
+                       ? "true" : "false");
+}
+
+void getURL(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    if (!ow::builtin::WebviewById(id)) return RespondError(res, "ventana no encontrada");
+    const gchar* uri =
+        webkit_web_view_get_uri(static_cast<WebKitWebView*>(ow::builtin::WebviewById(id)));
+    RespondOk(res, Value(std::string(uri ? uri : "")).Serialize().c_str());
+}
+
+void getTitle(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    if (!ow::builtin::WebviewById(id)) return RespondError(res, "ventana no encontrada");
+    const gchar* t =
+        webkit_web_view_get_title(static_cast<WebKitWebView*>(ow::builtin::WebviewById(id)));
+    RespondOk(res, Value(std::string(t ? t : "")).Serialize().c_str());
+}
+
+// args: [windowId, text, {matchCase?, backwards?}?] → {matches, active}
+struct FindCtx {
+    volatile bool done = false;
+    guint count = 0;
+    guint active = 0;
+};
+
+static void OnFoundCount(WebKitFindController*, guint count, gpointer ud) {
+    auto* c = static_cast<FindCtx*>(ud);
+    c->count = count;
+    c->done = true;
+}
+
+void findInPage(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().size() < 2 ||
+        !parsed.value->AsArray()[1].IsString())
+        return RespondError(res, "se esperan [windowId, text]");
+    const auto& a = parsed.value->AsArray();
+    uint32_t id = static_cast<uint32_t>(a[0].AsInt());
+    void* viewV = ow::builtin::WebviewById(id);
+    if (!viewV) return RespondError(res, "ventana no encontrada");
+    WebKitWebView* view = WEBKIT_WEB_VIEW(viewV);
+
+    bool matchCase = false, backwards = false;
+    if (a.size() > 2 && a[2].IsObject()) {
+        if (auto* v = a[2].Find("matchCase"); v && v->IsBool()) matchCase = v->AsBool();
+        if (auto* v = a[2].Find("backwards"); v && v->IsBool()) backwards = v->AsBool();
+    }
+
+    WebKitFindController* fc = webkit_web_view_get_find_controller(view);
+
+    guint options = WEBKIT_FIND_OPTIONS_NONE;
+    if (!matchCase) options |= WEBKIT_FIND_OPTIONS_CASE_INSENSITIVE;
+    if (backwards) options |= WEBKIT_FIND_OPTIONS_BACKWARDS;
+
+    // search() dispara counted-matches; match-count se lee por GObject.
+    webkit_find_controller_search(fc, a[1].AsString().c_str(), options, 1000);
+    int guard = 0;
+    guint matches = 0, stable = 0;
+    while (guard++ < 300) {
+        gtk_main_iteration();
+        guint now = 0;
+        g_object_get(G_OBJECT(fc), "match-count", &now, nullptr);
+        if (now == matches && now > 0) { ++stable; if (stable > 10) break; }
+        else { matches = now; stable = 0; }
+    }
+    ow::log::Debug("window", "findInPage matches=" + std::to_string(matches));
+
+    Object out;
+    out.emplace_back("matches", Value(static_cast<int64_t>(matches)));
+    out.emplace_back("active", Value(static_cast<int64_t>(
+        backwards ? matches : (matches ? 1 : 0))));
+    RespondOk(res, Value(std::move(out)).Serialize().c_str());
+}
+
+void findStop(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
+    uint32_t id = WinId(args);
+    if (!ow::builtin::WebviewById(id)) return RespondError(res, "ventana no encontrada");
+    webkit_find_controller_search_finish(
+        webkit_web_view_get_find_controller(
+            static_cast<WebKitWebView*>(ow::builtin::WebviewById(id))));
+    RespondOk(res, "null");
+}
 } // namespace winx
 
 namespace ow::internal {
@@ -220,6 +364,16 @@ const ow_module_desc_t* WindowExtrasDescriptor(void) {
         {"setIcon", &winx::setIcon},
         {"setUserAgent", &winx::setUserAgent},
         {"zoom", &winx::zoom},
+        {"reload", &winx::reload},
+        {"stop", &winx::stop},
+        {"goBack", &winx::goBack},
+        {"goForward", &winx::goForward},
+        {"canGoBack", &winx::canGoBack},
+        {"canGoForward", &winx::canGoForward},
+        {"getURL", &winx::getURL},
+        {"getTitle", &winx::getTitle},
+        {"findInPage", &winx::findInPage},
+        {"findStop", &winx::findStop},
     };
     static const ow_module_desc_t d{
         "window", OW_VERSION_STRING, fns, sizeof(fns) / sizeof(fns[0])};

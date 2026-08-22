@@ -11,6 +11,7 @@
 #include "Window_p.hpp"
 #include "../Bridge/Dispatcher.hpp"
 #include "../Core/App.hpp"
+#include "../Control/ControlServer.hpp"
 #include "../Core/Log.hpp"
 #include "ow/detail/minjson.hpp"
 
@@ -103,13 +104,24 @@ void Window::Impl::HandleWebViewMessage(std::string_view text) {
         } else {
             resultJson.assign(res.json, res.json_len);
         }
-        EnqueueOp({OpKind::Apply, std::to_string(msg.id), ok ? "true" : "false",
-                   resultJson});
-        ScheduleFlush(this);
+        // Apply DIRECTO (no batched): los awaits de promesas en el renderer
+        // dependen de esta resolución inmediata; batchearla puede deadlockear
+        // cuando el propio evaluate espera la promesa.
+        std::string js = "window.__ow && window.__ow._apply(" +
+                         std::to_string(msg.id) + ',' + (ok ? "true" : "false") + ',' +
+                         json::JsLiteral(resultJson) + ")";
+        if (webview) webview->EvalJS(js);
         return;
     }
 
     if (msg.type == bridge::MsgType::Event) {
+        // IPC dirigido: to != 0 y distinta de esta ventana → enrutar al destino
+        if (msg.to != 0 && msg.to != id) {
+            auto it = LiveWindows().find(msg.to);
+            if (it != LiveWindows().end())
+                it->second->EmitToJS(msg.name, msg.json);
+            return;
+        }
         FireEvent(msg.name, msg.json);
     }
 }

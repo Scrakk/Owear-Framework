@@ -8,6 +8,7 @@
 // (mismo patrón que los diálogos modales).
 //
 #include "../../../src/Core/BuiltinUtil.hpp"
+#include "../../../src/Control/ControlServer.hpp"
 #include "ow/Json.h"
 #include "ow/Module.h"
 #include "ow_api.h"
@@ -270,11 +271,10 @@ static void OnDlFinished(WebKitDownload* dl, gpointer ud) {
     g_downloads.erase(id);
 }
 
-static void OnDownloadStarted(WebKitWebView* view, WebKitDownload* dl,
-                              gpointer) {
+static void OnDownloadStarted(WebKitWebView* /*view*/, WebKitDownload* dl,
+                              gpointer user_wid) {
     int id = g_nextDl++;
-    auto wid = static_cast<uint32_t>(
-        reinterpret_cast<guintptr>(g_object_get_data(G_OBJECT(view), "ow-win-id")));
+    auto wid = static_cast<uint32_t>(reinterpret_cast<guintptr>(user_wid));
     g_downloads[id] = DlInfo{wid, static_cast<WebKitDownload*>(g_object_ref(dl))};
 
     const gchar* uri = webkit_download_get_destination(dl);
@@ -305,10 +305,24 @@ void attach(const ow_request_t* req, ow_response_t* res) {
 
     g_object_set_data(G_OBJECT(view), "ow-win-id",
                       reinterpret_cast<gpointer>(static_cast<guintptr>(id)));
-    g_signal_connect(view, "download-started",
-                     G_CALLBACK(+[](WebKitWebView* v, WebKitDownload* dl,
-                                    gpointer ud) { OnDownloadStarted(v, dl, ud); }),
-                     nullptr);
+
+    // 'download-started' vive en el WebContext, no en el view
+    WebKitWebContext* wctx = webkit_web_view_get_context(WEBKIT_WEB_VIEW(view));
+    if (!g_object_get_data(G_OBJECT(wctx), "ow-dl-connected")) {
+        g_object_set_data(G_OBJECT(wctx), "ow-dl-connected", GINT_TO_POINTER(1));
+        g_signal_connect(wctx, "download-started",
+                         G_CALLBACK(+[](WebKitWebContext*, WebKitDownload* dl,
+                                        gpointer) {
+                             // windowId: usa la ventana más reciente con attach
+                             uint32_t wid = 0;
+                             if (!ow::LiveWindows().empty())
+                                 wid = ow::LiveWindows().rbegin()->first;
+                             OnDownloadStarted(nullptr, dl,
+                                               reinterpret_cast<gpointer>(
+                                                   static_cast<guintptr>(wid)));
+                         }),
+                         nullptr);
+    }
     RespondOk(res, "null");
 }
 
@@ -324,6 +338,53 @@ void downloadCancel(const ow_request_t* req, ow_response_t* res) {
     RespondOk(res, "null");
 }
 
+
+// ── extras F-next ──────────────────────────────────────────────────────────
+
+// args: [ua] — aplica a TODAS las ventanas vivas
+void setUserAgentAll(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    if (!parsed.value || !parsed.value->IsArray() || !parsed.value->AsArray()[0].IsString())
+        return RespondError(res, "userAgent requerido");
+    std::string ua = parsed.value->AsArray()[0].AsString();
+    for (auto& [id, w] : ow::LiveWindows()) {
+        auto* view = static_cast<WebKitWebView*>(ow::builtin::WebviewById(id));
+        if (!view) continue;
+        webkit_settings_set_user_agent(webkit_web_view_get_settings(view),
+                                       ua.c_str());
+    }
+    RespondOk(res, "null");
+}
+
+// args: [windowId, langs...] ej: ["es","en"] · vacío = off
+void spellCheck(const ow_request_t* req, ow_response_t* res) {
+    auto parsed = ow::json::Parse(std::string_view(req->json, req->json_len));
+    if (!parsed.value || !parsed.value->IsArray() || parsed.value->AsArray().empty())
+        return RespondError(res, "se esperan [windowId, lang1, lang2…]");
+    const auto& a = parsed.value->AsArray();
+    void* view = ow::builtin::WebviewById(static_cast<uint32_t>(a[0].AsInt()));
+    if (!view) return RespondError(res, "ventana no encontrada");
+    WebKitWebContext* wctx =
+        webkit_web_view_get_context(WEBKIT_WEB_VIEW(view));
+
+    if (a.size() > 1) {
+        const gchar* langs[8] = {};
+        guint n = 0;
+        std::string keep[8];
+        for (guint i = 1; i < a.size() && n < 7; ++i) {
+            if (!a[i].IsString()) continue;
+            keep[n] = a[i].AsString(); // los settings referencian los strings
+            langs[n++] = keep[n].c_str();
+        }
+        langs[n] = nullptr;
+        webkit_web_context_set_spell_checking_enabled(wctx, TRUE);
+        webkit_web_context_set_spell_checking_languages(wctx, langs);
+    } else {
+        webkit_web_context_set_spell_checking_enabled(wctx, FALSE);
+    }
+    RespondOk(res, "null");
+}
+
 } // namespace sess
 
 namespace ow::internal {
@@ -336,6 +397,8 @@ const ow_module_desc_t* SessionDescriptor(void) {
         {"setProxy", &sess::setProxy},
         {"attach", &sess::attach},
         {"downloadCancel", &sess::downloadCancel},
+        {"setUserAgentAll", &sess::setUserAgentAll},
+        {"spellCheck", &sess::spellCheck},
     };
     static const ow_module_desc_t d{
         "session", OW_VERSION_STRING, fns, sizeof(fns) / sizeof(fns[0])};

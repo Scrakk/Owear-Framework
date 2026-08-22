@@ -18,6 +18,7 @@ set(OW_KERNEL_SOURCES
     ${CMAKE_SOURCE_DIR}/api/window/src/window_extra.cpp
     ${CMAKE_SOURCE_DIR}/api/session/src/session_builtin.cpp
     ${CMAKE_SOURCE_DIR}/api/crashreporter/src/crashreporter.cpp
+    ${CMAKE_SOURCE_DIR}/api/app/src/app_builtin.cpp
     Core/App.cpp
     Core/Log.cpp
     Core/ModuleLoader.cpp

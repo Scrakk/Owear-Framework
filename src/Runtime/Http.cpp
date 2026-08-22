@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // src/Runtime/Http.cpp — cliente HTTP/1.1 + TLS (OpenSSL) sobre sockets POSIX.
-// Solo lo que el Runtime Manager necesita: GET con redirects,
-// Content-Length y chunked. Sin dependencia de libcurl.
+// Sin dependencia de libcurl: GET/POST/PUT/DELETE con headers, body,
+// timeout, redirects, Content-Length y chunked.
 //
 #include "Http.hpp"
 
@@ -19,8 +19,6 @@
 #include <fstream>
 #include <map>
 #include <mutex>
-#include <sstream>
-#include <string>
 
 namespace ow::http {
 
@@ -49,7 +47,8 @@ bool ParseUrl(const std::string& url, Url& out, std::string& error) {
     if (!out.tls) out.port = "80";
     std::string rest = url.substr(schemeEnd + 3);
     auto pathStart = rest.find('/');
-    std::string authority = pathStart == std::string::npos ? rest : rest.substr(0, pathStart);
+    std::string authority =
+        pathStart == std::string::npos ? rest : rest.substr(0, pathStart);
     out.path = pathStart == std::string::npos ? "/" : rest.substr(pathStart);
     auto colon = authority.rfind(':');
     if (colon != std::string::npos && authority.find(']') == std::string::npos) {
@@ -62,6 +61,8 @@ bool ParseUrl(const std::string& url, Url& out, std::string& error) {
     return true;
 }
 
+// ── transporte ──────────────────────────────────────────────────────────────
+
 class TlsConnection {
 public:
     ~TlsConnection() {
@@ -69,7 +70,7 @@ public:
         // ctx_ es singleton del proceso (compartido) — NUNCA se libera aquí
     }
 
-    bool Connect(const Url& url, std::string& error) {
+    bool Connect(const Url& url, int timeoutSecs, std::string& error) {
         addrinfo hints{};
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
@@ -79,10 +80,12 @@ public:
             error = "DNS falló para " + url.host;
             return false;
         }
-
         for (addrinfo* p = res; p; p = p->ai_next) {
             fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
             if (fd_ < 0) continue;
+            timeval tv{timeoutSecs, 0};
+            setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
             if (::connect(fd_, p->ai_addr, p->ai_addrlen) == 0) break;
             ::close(fd_);
             fd_ = -1;
@@ -92,8 +95,9 @@ public:
 
         static SSL_CTX* sharedCtx = nullptr;
         std::call_once(g_sslInit, [] {
-            OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS,
-                             nullptr);
+            OPENSSL_init_ssl(
+                OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS,
+                nullptr);
             sharedCtx = SSL_CTX_new(TLS_client_method());
             if (sharedCtx) SSL_CTX_set_default_verify_paths(sharedCtx);
         });
@@ -128,7 +132,6 @@ public:
         return true;
     }
 
-    /// Lee hasta EOF o hasta que el peer cierre. false en error de transporte.
     bool ReadAll(std::string& out) const {
         char buf[16384];
         while (true) {
@@ -139,7 +142,7 @@ public:
             }
             int err = SSL_get_error(ssl_, n);
             if (err == SSL_ERROR_ZERO_RETURN) return true;
-            if (err == SSL_ERROR_SYSCALL && (errno == ECONNRESET)) return true;
+            if (err == SSL_ERROR_SYSCALL && errno == ECONNRESET) return true;
             return err == SSL_ERROR_ZERO_RETURN;
         }
     }
@@ -150,16 +153,58 @@ private:
     SSL* ssl_ = nullptr;
 };
 
-struct Response {
-    int status = 0;
-    std::map<std::string, std::string> headers; // claves en minúsculas
-    std::string body;
+class PlainConnection {
+public:
+    bool Connect(const Url& url, int timeoutSecs, std::string& error) {
+        addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* res = nullptr;
+        if (::getaddrinfo(url.host.c_str(), url.port.c_str(), &hints, &res) != 0 ||
+            !res) {
+            error = "DNS falló";
+            return false;
+        }
+        for (addrinfo* p = res; p; p = p->ai_next) {
+            fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+            if (fd_ < 0) continue;
+            timeval tv{timeoutSecs, 0};
+            setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+            if (::connect(fd_, p->ai_addr, p->ai_addrlen) == 0) break;
+            ::close(fd_);
+            fd_ = -1;
+        }
+        freeaddrinfo(res);
+        if (fd_ < 0) { error = "connect falló"; return false; }
+        return true;
+    }
+    bool SendAll(const void* d, size_t l) const {
+        const char* p = static_cast<const char*>(d);
+        while (l > 0) {
+            ssize_t n = ::write(fd_, p, l);
+            if (n <= 0) return false;
+            p += n;
+            l -= static_cast<size_t>(n);
+        }
+        return true;
+    }
+    bool ReadAll(std::string& out) const {
+        char buf[16384];
+        ssize_t n;
+        while ((n = ::read(fd_, buf, sizeof(buf))) > 0)
+            out.append(buf, static_cast<size_t>(n));
+        return true;
+    }
+    ~PlainConnection() { if (fd_ >= 0) ::close(fd_); }
+
+private:
+    int fd_ = -1;
 };
 
 bool ParseHeaders(const std::string& head, Response& r) {
     size_t lineEnd = head.find("\r\n");
-    if (lineEnd == std::string::npos) return false;
-    // HTTP/1.1 200 OK
+    if (lineEnd == std::string::npos || head.size() < 12) return false;
     std::istringstream ss(head.substr(9, 3));
     ss >> r.status;
     size_t pos = lineEnd + 2;
@@ -180,141 +225,157 @@ bool ParseHeaders(const std::string& head, Response& r) {
     return r.status > 0;
 }
 
-class PlainConnection {
-public:
-    bool Connect(const Url& url, std::string& error) {
-        addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        addrinfo* res = nullptr;
-        if (::getaddrinfo(url.host.c_str(), url.port.c_str(), &hints, &res) != 0 || !res) {
-            error = "DNS falló";
+} // namespace
+
+Request::Request(std::string method_, std::string url_)
+    : method(std::move(method_)), url(std::move(url_)) {}
+Request& Request::header(std::string k, std::string v) {
+    headers[std::move(k)] = std::move(v);
+    return *this;
+}
+Request& Request::body(std::string b) {
+    bodyData = std::move(b);
+    return *this;
+}
+Request& Request::timeout(int secs) {
+    timeoutSecs = secs;
+    return *this;
+}
+
+namespace {
+
+bool RequestOnce(const Url& url, const Request& req, Response& resp,
+                 std::string& error) {
+    std::string payload = req.bodyData;
+
+    // headers por defecto
+    std::map<std::string, std::string> hdrs = req.headers;
+    if (!hdrs.count("user-agent")) hdrs["User-Agent"] = "owear/0.1 (+https://owear.dev)";
+    if (!payload.empty() && !hdrs.count("content-type"))
+        hdrs["Content-Type"] = "application/octet-stream";
+    if (!payload.empty() && !hdrs.count("content-length"))
+        hdrs["Content-Length"] = std::to_string(payload.size());
+    hdrs["Connection"] = "close";
+    hdrs["Accept"] = "*/*";
+
+    std::string head = req.method + " " + url.path + " HTTP/1.1\r\nHost: " +
+                       url.host + "\r\n";
+    for (auto& [k, v] : hdrs) head += k + ": " + v + "\r\n";
+    head += "\r\n";
+
+    auto converse = [&](auto& conn) -> bool {
+        if (!conn.SendAll(head.data(), head.size())) {
+            error = "envío falló";
             return false;
         }
-        for (addrinfo* p = res; p; p = p->ai_next) {
-            fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
-            if (fd_ < 0) continue;
-            if (::connect(fd_, p->ai_addr, p->ai_addrlen) == 0) break;
-            ::close(fd_);
-            fd_ = -1;
+        if (!payload.empty() && !conn.SendAll(payload.data(), payload.size())) {
+            error = "envío de body falló";
+            return false;
         }
-        freeaddrinfo(res);
-        if (fd_ < 0) { error = "connect falló"; return false; }
-        return true;
-    }
-    bool SendAll(const void* d, size_t l) const {
-        const char* p = static_cast<const char*>(d);
-        while (l > 0) {
-            ssize_t n = ::write(fd_, p, l);
-            if (n <= 0) return false;
-            p += n; l -= static_cast<size_t>(n);
+        std::string all;
+        if (!conn.ReadAll(all)) {
+            error = "lectura falló";
+            return false;
         }
-        return true;
-    }
-    bool ReadAll(std::string& out) const {
-        char buf[16384];
-        ssize_t n;
-        while ((n = ::read(fd_, buf, sizeof(buf))) > 0) out.append(buf, static_cast<size_t>(n));
-        return true;
-    }
-    ~PlainConnection() { if (fd_ >= 0) ::close(fd_); }
-private:
-    int fd_ = -1;
-};
+        auto sep = all.find("\r\n\r\n");
+        if (sep == std::string::npos) {
+            error = "respuesta malformada";
+            return false;
+        }
+        if (!ParseHeaders(all.substr(0, sep), resp)) {
+            error = "cabeceras inválidas";
+            return false;
+        }
+        std::string rawBody = all.substr(sep + 4);
 
-bool RequestOnce(const Url& url, Response& resp, std::string& error) {
-    std::string req = "GET " + url.path +
-                      " HTTP/1.1\r\nHost: " + url.host +
-                      "\r\nUser-Agent: owear/0.1 (+https://owear.dev)\r\n"
-                      "Accept: */*\r\nConnection: close\r\n\r\n";
-    std::string all;
+        auto itChunked = resp.headers.find("transfer-encoding");
+        if (itChunked != resp.headers.end() &&
+            itChunked->second.find("chunked") != std::string::npos) {
+            size_t pos = 0;
+            while (pos < rawBody.size()) {
+                auto eol = rawBody.find("\r\n", pos);
+                if (eol == std::string::npos) break;
+                uint64_t sz =
+                    std::strtoull(rawBody.substr(pos, eol - pos).c_str(), nullptr, 16);
+                if (sz == 0) break;
+                size_t dataStart = eol + 2;
+                if (dataStart + sz > rawBody.size()) {
+                    error = "chunked truncado";
+                    return false;
+                }
+                resp.body.append(rawBody, dataStart, static_cast<size_t>(sz));
+                pos = dataStart + sz + 2;
+            }
+        } else {
+            resp.body = std::move(rawBody);
+        }
+        return true;
+    };
 
     if (url.tls) {
         TlsConnection conn;
-        if (!conn.Connect(url, error)) return false;
-        if (!conn.SendAll(req.data(), req.size())) { error = "envío falló"; return false; }
-        if (!conn.ReadAll(all)) { error = "lectura falló"; return false; }
-    } else {
-        PlainConnection conn;
-        if (!conn.Connect(url, error)) return false;
-        if (!conn.SendAll(req.data(), req.size())) { error = "envío falló"; return false; }
-        if (!conn.ReadAll(all)) { error = "lectura falló"; return false; }
+        if (!conn.Connect(url, req.timeoutSecs, error)) return false;
+        return converse(conn);
     }
-
-    auto sep = all.find("\r\n\r\n");
-    if (sep == std::string::npos) {
-        error = "respuesta malformada";
-        return false;
-    }
-    if (!ParseHeaders(all.substr(0, sep), resp)) {
-        error = "cabeceras inválidas";
-        return false;
-    }
-    std::string body = all.substr(sep + 4);
-
-    auto itChunked = resp.headers.find("transfer-encoding");
-    if (itChunked != resp.headers.end() &&
-        itChunked->second.find("chunked") != std::string::npos) {
-        size_t pos = 0;
-        while (pos < body.size()) {
-            auto eol = body.find("\r\n", pos);
-            if (eol == std::string::npos) break;
-            uint64_t sz = std::strtoull(body.substr(pos, eol - pos).c_str(), nullptr, 16);
-            if (sz == 0) break;
-            size_t dataStart = eol + 2;
-            if (dataStart + sz > body.size()) { error = "chunked truncado"; return false; }
-            resp.body.append(body, dataStart, static_cast<size_t>(sz));
-            pos = dataStart + sz + 2;
-        }
-    } else {
-        resp.body = std::move(body);
-    }
-    return true;
+    PlainConnection conn;
+    if (!conn.Connect(url, req.timeoutSecs, error)) return false;
+    return converse(conn);
 }
 
 } // namespace
 
-bool DownloadToString(const std::string& url, std::string& out, std::string& error) {
+Response Perform(const Request& req, std::string& error) {
     constexpr int kMaxRedirects = 8;
-    std::string currentUrl = url;
+    std::string currentUrl = req.url;
+    Request r = req;
     for (int i = 0; i <= kMaxRedirects; ++i) {
         Url u;
-        if (!ParseUrl(currentUrl, u, error)) return false;
+        if (!ParseUrl(currentUrl, u, error)) {
+            error = "URL inválida";
+            return {};
+        }
         Response resp;
-        if (!RequestOnce(u, resp, error)) return false;
+        if (!RequestOnce(u, r, resp, error)) return {};
 
-        if ((resp.status == 301 || resp.status == 302 || resp.status == 307 ||
-             resp.status == 308)) {
+        if (resp.status == 301 || resp.status == 302 || resp.status == 307 ||
+            resp.status == 308) {
             auto loc = resp.headers.find("location");
             if (loc == resp.headers.end()) {
                 error = "redirect sin location";
-                return false;
+                return {};
             }
             currentUrl = loc->second;
             continue;
         }
-        if (resp.status < 200 || resp.status >= 300) {
-            error = "HTTP " + std::to_string(resp.status) + " en " + currentUrl;
-            return false;
-        }
-        if (out.capacity() == 0) out.reserve(resp.body.size());
+        return resp;
+    }
+    error = "demasiados redirects";
+    return {};
+}
+
+bool DownloadToString(const std::string& url, std::string& out, std::string& error) {
+    auto resp = Perform(Request("GET", url), error);
+    if (error.empty()) {
+        out.reserve(resp.body.size());
         out = std::move(resp.body);
         return true;
     }
-    error = "demasiados redirects";
     return false;
 }
 
 bool DownloadToFile(const std::string& url, const std::filesystem::path& dest,
                     std::string& error) {
-    std::string body;
-    if (!DownloadToString(url, body, error)) return false;
+    auto resp = Perform(Request("GET", url), error);
+    if (!error.empty()) return false;
     std::error_code ec;
     if (dest.has_parent_path())
         std::filesystem::create_directories(dest.parent_path(), ec);
     std::ofstream f(dest, std::ios::binary | std::ios::trunc);
-    if (!f) { error = "no se pudo crear " + dest.string(); return false; }
-    f.write(body.data(), static_cast<std::streamsize>(body.size()));
+    if (!f) {
+        error = "no se pudo crear " + dest.string();
+        return false;
+    }
+    f.write(resp.body.data(), static_cast<std::streamsize>(resp.body.size()));
     if (!f) {
         error = "escritura fallida";
         std::filesystem::remove(dest, ec);

@@ -116,6 +116,26 @@ std::string BuildBridgeScript() {
         return r.arrayBuffer();
       });
     },
+    /* findInPage vía window.find (fallback JS; el nativo usa FindController) */
+    findInPage: function(text, opts) {
+      var cs = opts && opts.matchCase ? false : true; // insensitive por defecto
+      var bw = opts && opts.backwards ? true : false;
+      if (!window.find || !window.find(text, cs, bw)) return { matches: 0, active: 0 };
+      var n = 1;
+      while (n < 1000 && window.find(text, cs, bw)) n++;
+      return { matches: n, active: n };
+    },
+    /* IPC dirigido ventana→ventana (F-next) */
+    emitTo: function(targetWindowId, name, payload) {
+      if (targetWindowId === window.__owWindowId) {
+        // mismo destino: despacho local inmediato
+        var set0 = listeners.get(name);
+        if (set0) set0.forEach(function(cb) { try { cb(payload); } catch (e) {} });
+      }
+      send({ t: 'event', to: targetWindowId, n: name,
+             p: payload === undefined ? null : payload,
+             w: window.__owWindowId || 0 });
+    },
     on: function(name, cb) {
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name).add(cb);

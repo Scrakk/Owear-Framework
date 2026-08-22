@@ -173,7 +173,9 @@ public:
                     if (jsc_value_is_string(value)) {
                         result = json::Value(std::string(str)).Serialize();
                     } else {
-                        result = str ? str : "null";
+                        result = (str && strcmp(str, "undefined") != 0)
+                                     ? str
+                                     : "null"; // undefined no es JSON válido
                     }
                     g_free(str);
                 }
