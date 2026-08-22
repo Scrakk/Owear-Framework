@@ -108,6 +108,9 @@ endif()
 if(OW_PLATFORM STREQUAL "mac")
     target_include_directories(owear_core PRIVATE
         ${OPENSSL_INCLUDE_DIRS} ${GLIB2_INCLUDE_DIRS})
+    # Homebrew es keg-only: sin estos dirs el enlazador no halla -lssl/-lglib
+    target_link_directories(owear_core PUBLIC
+        ${OPENSSL_LIBRARY_DIRS} ${GLIB2_LIBRARY_DIRS})
     target_link_libraries(owear_core PUBLIC
         ${OPENSSL_LIBRARIES} ${GLIB2_LIBRARIES}
         ${COCOA_FRAMEWORK} ${WEBKIT_FRAMEWORK})
