@@ -199,4 +199,21 @@ bool PtyResize(int id, int cols, int rows, std::string& err) {
     return true;
 }
 
+bool WritePtyWin(int id, const char* data, size_t len, std::string& err) {
+    HANDLE in = nullptr;
+    {
+        std::lock_guard pl(g_ptyPairsMu);
+        auto it = g_ptyPairs.find(id);
+        if (it == g_ptyPairs.end()) { err = "pty inválido"; return false; }
+        in = it->second.in;
+    }
+    DWORD written = 0;
+    if (!WriteFile(in, data, static_cast<DWORD>(len), &written, nullptr) ||
+        written != len) {
+        err = "escritura al PTY falló";
+        return false;
+    }
+    return true;
+}
+
 } // namespace proc

@@ -11,6 +11,8 @@
 #include "../IWebviewBackend.hpp"
 #include "../../Core/Log.hpp"
 
+#include "ow/Json.h" // error JSON de EvalJS (json::Object)
+
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 
@@ -171,7 +173,8 @@ public:
         OwMessageProxy* proxy =
             [[OwMessageProxy alloc] initWithBlock:^(WKScriptMessage* msg) {
                 if ([msg.body isKindOfClass:[NSString class]] && handler_) {
-                    handler_(std::string_view(msg.body.UTF8String));
+                    handler_(std::string_view(
+                        ((NSString*)msg.body).UTF8String)); // cast: body es id
                 }
             }];
         proxy_ = proxy;
@@ -209,7 +212,7 @@ public:
                      std::string out = "null";
                      if (ok) {
                          if ([result isKindOfClass:[NSString class]])
-                             out = result.UTF8String;
+                             out = ((NSString*)result).UTF8String;
                          else if (result != nil) {
                              NSData* d = [NSJSONSerialization
                                  dataWithJSONObject:result

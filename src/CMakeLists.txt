@@ -116,6 +116,8 @@ endif()
 # ── Binario del runtime ──────────────────────────────────────────────────────
 add_executable(owear main_kernel.cpp)
 target_link_libraries(owear PRIVATE owear_core)
+# Import library del exe para que los .owm (MSVC) resuelvan ow_shm_* del host.
+set_target_properties(owear PROPERTIES ENABLE_EXPORTS ON)
 if(MSVC)
     # Los .owm ven __declspec(dllimport) (OW_MODULE_BUILD en include/ow/Shm.h):
     # el exe del kernel debe exportar los símbolos (en Linux lo cubre -rdynamic).

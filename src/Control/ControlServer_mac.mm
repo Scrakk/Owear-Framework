@@ -9,6 +9,7 @@
 #include "ow/App.h"
 
 #include <dispatch/dispatch.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/ucred.h>
 #include <sys/un.h>
@@ -35,8 +36,11 @@ public:
                       static_cast<int>(getpid()));
 
         ::unlink(path);
-        int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        // Darwin: socket() no acepta SOCK_NONBLOCK/SOCK_CLOEXEC → fcntl
+        int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
         if (fd < 0) return false;
+        ::fcntl(fd, F_SETFL, O_NONBLOCK); // dispatch sources asumen non-blocking
+        ::fcntl(fd, F_SETFD, FD_CLOEXEC);
 
         sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
@@ -54,9 +58,10 @@ public:
         acceptSource_ = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, fd, 0, q);
         dispatch_source_set_event_handler(acceptSource_, ^{
             while (true) {
-                int cfd = ::accept4(listenFd_, nullptr, nullptr,
-                                    SOCK_NONBLOCK | SOCK_CLOEXEC);
+                int cfd = ::accept(listenFd_, nullptr, nullptr); // Darwin: sin accept4
                 if (cfd < 0) break;
+                ::fcntl(cfd, F_SETFL, O_NONBLOCK);
+                ::fcntl(cfd, F_SETFD, FD_CLOEXEC);
 
                 // Verificación mínima de seguridad: solo aceptar clientes que
                 // corran con el mismo uid que este proceso (evita que otro

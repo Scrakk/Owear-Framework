@@ -38,6 +38,11 @@ function(ow_add_module NAME)
             ${OW_API_COMMON_FLAGS} -Wall -Wextra)
     endif()
     target_link_libraries(owear-api-${NAME} PRIVATE ${ARG_LIBS})
+    if(MSVC)
+        # Los .owm importan ow_shm_* (dllimport): enlazan contra la import
+        # library que MSVC genera para el exe del kernel (ENABLE_EXPORTS).
+        target_link_libraries(owear-api-${NAME} PRIVATE owear)
+    endif()
     set_target_properties(owear-api-${NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME "${NAME}")
 endfunction()
