@@ -1,0 +1,72 @@
+<!doctype html><body style='font-family:monospace;background:#181825;color:#cdd6f4;padding:14px'>
+<div id=r>probando builtins…</div><script>
+window.__R = {};
+const t = async (name, fn) => {
+  try { window.__R[name] = JSON.stringify(await fn()); }
+  catch (e) { window.__R[name] = 'ERR: ' + e.message; }
+};
+(async () => {
+  const W = window.__owWindowId;
+
+  await t('crash.install', async () => {
+    await ow.invoke('crashreporter','install');
+    return await ow.invoke('crashreporter','lastCrashLog'); // null esperado
+  });
+
+  await t('win.alwaysOnTop', async () => {
+    await ow.invoke('window','setAlwaysOnTop', W, true);
+    const on = await ow.invoke('window','isAlwaysOnTop', W);
+    await ow.invoke('window','setAlwaysOnTop', W, false);
+    return 'on=' + on;
+  });
+  await t('win.opacity', async () => {
+    await ow.invoke('window','setOpacity', W, 0.85);
+    await ow.invoke('window','setOpacity', W, 1.0);
+    return 'ok';
+  });
+  await t('win.flashFrame', async () => ow.invoke('window','flashFrame', W, false));
+  await t('win.zoom', async () => {
+    await ow.invoke('window','zoom', W, 1.25);
+    await ow.invoke('window','zoom', W, 1.0);
+    return 'ok';
+  });
+  await t('win.setUserAgent', async () =>
+    ow.invoke('window','setUserAgent', W, 'OwearTest/1.0'));
+  await t('win.capturePage', async () => {
+    const shot = await ow.invoke('window','capturePage', W);
+    // verifica magic PNG leyendo los primeros bytes vía SHM
+    const buf = new Uint8Array(await ow.readShared(shot.__ow_shm));
+    const isPng = buf[0]===0x89 && buf[1]===0x50 && buf[2]===0x4E && buf[3]===0x47;
+    return `PNG=${isPng} ${shot.__ow_shm.size}b ${shot.__ow_shm ? '' : ''}`;
+  });
+  await t('win.devtools', async () => {
+    await ow.invoke('window','openDevTools', W, true);
+    await new Promise(r=>setTimeout(r,400));
+    await ow.invoke('window','openDevTools', W, false);
+    return 'open+close ok';
+  });
+
+  await t('session.cookies', async () => {
+    await ow.invoke('session','cookiesSet',{name:'ow_e2e',value:'123',domain:'localhost'});
+    const got = await ow.invoke('session','cookiesGet','http://localhost:8123/');
+    const c = got.cookies.find(c=>c.name==='ow_e2e');
+    const del = await ow.invoke('session','cookieDelete','http://localhost:8123/','ow_e2e');
+    return `set→get(${c?c.value:'NO'})→del(${del})`;
+  });
+  await t('session.clearStorage', async () => ow.invoke('session','clearStorage', W));
+  await t('session.attachDownloads', async () => ow.invoke('session','attach', W));
+
+  await t('capturer.getSources', async () => {
+    const srcs = await ow.invoke('capturer','getSources');
+    return srcs.length + ' pantalla(s), thumb=' + (srcs[0].thumbnail.size) + 'b';
+  });
+  await t('capturer.captureScreen', async () => {
+    const shot = await ow.invoke('capturer','captureScreen',0);
+    const buf = new Uint8Array(await ow.readShared(shot.__ow_shm));
+    const isPng = buf[0]===0x89 && buf[1]===0x50;
+    return `PNG=${isPng} ${shot.width}x${shot.height}`;
+  });
+
+  window.__done = 1;
+})();
+</script></body>

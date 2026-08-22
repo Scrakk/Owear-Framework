@@ -36,19 +36,24 @@ void App::Quit(int exitCode) {
 namespace internal {
 
 // WindowModule.cpp + builtins acoplados al WebView (api/window, api/session,
-// api/crashreporter).
+// api/crashreporter, api/app — estos últimos requieren GLib y hoy solo tienen
+// implementación Linux; OW_BUILTINS_GTK lo define CMake en esa plataforma).
 const ow_module_desc_t* WindowModuleDescriptorImpl();
+#ifdef OW_BUILTINS_GTK
 const ow_module_desc_t* WindowExtrasDescriptor();
 const ow_module_desc_t* SessionDescriptor();
 const ow_module_desc_t* CrashReporterDescriptor();
-const ow_module_desc_t* AppModuleDescriptor();      // en api/app/
+const ow_module_desc_t* AppModuleDescriptor();
+#endif
 
 void RegisterBuiltinModules() {
     Dispatcher::Get().RegisterModule(WindowModuleDescriptorImpl(), "builtin:ow-window");
+#ifdef OW_BUILTINS_GTK
     Dispatcher::Get().RegisterModule(WindowExtrasDescriptor(), "builtin:window");
     Dispatcher::Get().RegisterModule(SessionDescriptor(), "builtin:session");
     Dispatcher::Get().RegisterModule(CrashReporterDescriptor(), "builtin:crashreporter");
     Dispatcher::Get().RegisterModule(AppModuleDescriptor(), "builtin:app");
+#endif
 }
 
 bool Bootstrap(int argc, char** argv, const AppOptions& options) {

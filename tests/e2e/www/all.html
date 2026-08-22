@@ -1,0 +1,98 @@
+<!doctype html><body style='font-family:monospace;background:#111;color:#eee'><div id=r>…</div><script>
+window.__R = {}; // resultados
+const t = async (name, fn) => {
+  try { window.__R[name] = JSON.stringify(await fn()); }
+  catch (e) { window.__R[name] = 'ERR: ' + e.message; }
+};
+(async () => {
+  await t('path.join', async () => ow.invoke('path','join','/usr','local','bin'));
+  await t('path.homeDir', async () => ow.invoke('path','homeDir'));
+  await t('fs.copy+rename', async () => {
+    await ow.invoke('fs','writeFile','/tmp/ow-a.txt','hola');
+    await ow.invoke('fs','copy','/tmp/ow-a.txt','/tmp/ow-b.txt');
+    await ow.invoke('fs','rename','/tmp/ow-b.txt','/tmp/ow-c.txt');
+    return await ow.invoke('fs','readText','/tmp/ow-c.txt');
+  });
+  await t('fs.realpath', async () => ow.invoke('fs','realpath','/etc/hosts'));
+  await t('fs.mkdtemp', async () => ow.invoke('fs','mkdtemp','owtest-'));
+  await t('fs.access', async () => ow.invoke('fs','access','/etc/hosts',4));
+  await t('fs.lstat', async () => ow.invoke('fs','lstat','/etc/hosts'));
+  await t('fs.handles', async () => {
+    const fd = await ow.invoke('fs','open','/tmp/ow-handle.txt','w');
+    const n = await ow.invoke('fs','write',fd,'contenido-handle');
+    await ow.invoke('fs','close',fd);
+    const fd2 = await ow.invoke('fs','open','/tmp/ow-handle.txt','r');
+    const r = await ow.invoke('fs','read',fd2,0,1024);
+    await ow.invoke('fs','close',fd2);
+    const txt = r.b64 ? atob(r.b64) : '(shm)';
+    return n + ':' + txt;
+  });
+  await t('fs.watch', async () => new Promise((res) => {
+    ow.invoke('fs','watch','/tmp/owtest',false).then(async (wid) => {
+      window.__watchId = wid;
+      ow.on('fs.watch', (p) => {
+        if (p.watcherId === wid && p.events.some(e => e.path.includes('watch-me.txt')))
+          res('evento recibido ✓');
+      });
+      await new Promise(r => setTimeout(r, 300));
+      await ow.invoke('fs','writeFile','/tmp/owtest/watch-me.txt','x');
+      setTimeout(() => res('timeout sin evento'), 3000);
+    });
+  }));
+  await t('process.spawn', async () => new Promise((res) => {
+    ow.invoke('process','spawn','echo',['HELLO_PROC']).then((r) => {
+      const pid = r.procId;
+      let got = '';
+      ow.on('process.stdout', (p) => {
+        if (p.procId !== pid) return;
+        got += atob(p.b64);
+      });
+      ow.on('process.exit', (p) => {
+        if (p.procId === pid) res(got.trim() + ' / exit=' + p.code);
+      });
+    }).catch(e => res('ERR ' + e.message));
+  }));
+  await t('process.pty', async () => new Promise((res) => {
+    ow.invoke('process','ptyOpen','/bin/bash',[],null,80,24).then((r) => {
+      const pid = r.procId;
+      let got = '';
+      const un1 = ow.on('process.stdout', (p) => {
+        if (p.procId !== pid) return;
+        got += atob(p.b64);
+        if (got.includes('PTY_FUNCIONA')) { un1(); res('pty-echo ✓'); }
+      });
+      setTimeout(() => ow.invoke('process','write',pid,'echo PTY_FUNCIONA\n'), 400);
+      setTimeout(() => { un1(); ow.invoke('process','kill',pid).catch(()=>{}); res('timeout pty: ' + got.slice(-60)); }, 4000);
+    }).catch(e => res('ERR ' + e.message));
+  }));
+  await t('screen.displays', async () => {
+    const d = await ow.invoke('screen','getAllDisplays');
+    const prim = d.find(x=>x.primary) || d[0]; return d.length + ' display(s), primary=' + prim.bounds.width + 'px';
+  });
+  await t('clipboard', async () => {
+    await ow.invoke('clipboard','writeText','OWEAR_CLIP_123');
+    return await ow.invoke('clipboard','readText');
+  });
+  await t('net.download', async () => {
+    const r = await ow.invoke('net','download','http://localhost:8123/fake-update.bin','/tmp/ow-dl.bin');
+    return 'sha256=' + r.sha256.slice(0,12) + '…';
+  });
+  await t('notification', async () => ow.invoke('notification','show','Owear E2E','Si ves esto, las notificaciones del sistema funcionan'));
+  await t('power', async () => {
+    await ow.invoke('power','monitorStart');
+    const id = await ow.invoke('power','inhibitStart','prevent-display-sleep');
+    await ow.invoke('power','inhibitStop',id);
+    return 'monitor+inhibit ok';
+  });
+  await t('shell.errpath', async () => {
+    try { await ow.invoke('shell','openExternal','ftp://no'); return 'sin validación ✗'; }
+    catch (e) { return 'rechaza ftp ✓'; }
+  });
+  await t('menu.noop', async () => ow.invoke('menu','setApplicationMenu',[]));
+  await t('updater.check', async () => {
+    const r = await ow.invoke('updater','checkForUpdates','http://localhost:8123/manifest.json','0.1.0');
+    return 'update=' + r.updateAvailable + ' v' + r.version;
+  });
+  window.__done = 1;
+})();
+</script></body>

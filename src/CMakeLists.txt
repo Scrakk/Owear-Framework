@@ -15,7 +15,6 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 set(OW_KERNEL_SOURCES
-    ${CMAKE_SOURCE_DIR}/api/app/src/app_builtin.cpp
     Core/App.cpp
     Core/Log.cpp
     Core/ModuleLoader.cpp
@@ -37,8 +36,10 @@ set(OW_KERNEL_SOURCES
 # Se compilaban incondicionalmente y rompían la configuración en Windows/macOS
 # (headers inexistentes en esas plataformas). Gateados aquí hasta que existan
 # implementaciones _mac/_win reales — ver docs/ROADMAP.md.
+# Builtins que requieren GLib/GTK (solo Linux hasta tener impl nativa win/mac).
 if(OW_PLATFORM STREQUAL "linux")
     list(APPEND OW_KERNEL_SOURCES
+        ${CMAKE_SOURCE_DIR}/api/app/src/app_builtin.cpp
         ${CMAKE_SOURCE_DIR}/api/window/src/window_extra.cpp
         ${CMAKE_SOURCE_DIR}/api/session/src/session_builtin.cpp
         ${CMAKE_SOURCE_DIR}/api/crashreporter/src/crashreporter.cpp
@@ -73,6 +74,10 @@ elseif(OW_PLATFORM STREQUAL "mac")
 endif()
 
 add_library(owear_core STATIC ${OW_KERNEL_SOURCES})
+
+if(OW_PLATFORM STREQUAL "linux")
+    target_compile_definitions(owear_core PUBLIC OW_BUILTINS_GTK=1)
+endif()
 
 target_include_directories(owear_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
