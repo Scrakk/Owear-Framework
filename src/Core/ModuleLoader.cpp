@@ -21,6 +21,9 @@
 #include <cstdlib>
 #include <mutex>
 
+// receptor del host para builtins (definido en BuiltinUtil_<plat>)
+extern "C" void ow_builtin_receive_host(const ::ow_module_host_t* h);
+
 namespace ow {
 
 namespace {
@@ -145,6 +148,10 @@ size_t ModuleLoader::LoadAll() {
         }
     }
     return total;
+}
+
+void ModuleLoader::ProvideHostToBuiltins() {
+    ::ow_builtin_receive_host(static_cast<const ::ow_module_host_t*>(&g_host));
 }
 
 void ModuleLoader::Shutdown() {

@@ -75,5 +75,14 @@ E2E en Linux (19/19 pruebas en verde).
 | globalshortcut (X11 XGrabKey; **opcional**, Wayland no soportado) | ✅ registrado | RegisterHotKey — pendiente |
 | tray (libayatana-appindicator — requiere `libayatana-appindicator3-dev`) | ⏸ omitida sin deps | Shell_NotifyIcon/NSStatusItem — pendiente |
 
-Pendientes siguientes: session/cookies/downloads (kernel-coupled), window-extras
-(devtools/capturePage/printToPDF), capturer (X11→PNG→SHM), crashreporter.
+## Builtins kernel-coupled ✅ Linux
+
+| API | Estado |
+|---|---|
+| window-extras (devtools ✓ capturePage PNG→SHM ✓ alwaysOnTop ✓ opacity ✓ flashFrame ✓ setIcon ✓ userAgent ✓ zoom ✓; printToPDF/progressBar → error claro v1) | ✅ E2E 13/13 |
+| session (cookies get/set/delete ✓ clearStorage ✓ proxy ✓ downloads con eventos ✓) | ✅ E2E cookies |
+| capturer (getSources thumbnails + captureScreen full → SHM PNG; **X11-only**, Wayland = error documentado) | ✅ E2E bajo Xvfb |
+| crashreporter (señales + backtrace a cache/crashes/) | ✅ registrado |
+
+Total: **18 módulos** (14 .owm dinámicos + 4 builtins kernel), 32 pruebas E2E
+en verde sobre Linux (19 all.html + 13 builtins.html bajo Xvfb).

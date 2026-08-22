@@ -69,3 +69,6 @@ add_subdirectory(power)
 
 # ── updater (autoUpdater genérico manifest+sha256+replace) ───────────────────
 add_subdirectory(updater)
+
+# ── capturer (captura de pantallas X11 → PNG → SHM) ──────────────────────────
+add_subdirectory(capturer)

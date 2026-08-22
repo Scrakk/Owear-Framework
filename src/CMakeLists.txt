@@ -15,6 +15,9 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 set(OW_KERNEL_SOURCES
+    ${CMAKE_SOURCE_DIR}/api/window/src/window_extra.cpp
+    ${CMAKE_SOURCE_DIR}/api/session/src/session_builtin.cpp
+    ${CMAKE_SOURCE_DIR}/api/crashreporter/src/crashreporter.cpp
     Core/App.cpp
     Core/Log.cpp
     Core/ModuleLoader.cpp
@@ -36,6 +39,7 @@ if(OW_PLATFORM STREQUAL "linux")
         Core/App_linux.cpp
         Window/window_linux.cpp
         Webview/linux/WebKitGTKBackend.cpp
+        Webview/linux/BuiltinUtil_linux.cpp
         Control/ControlServer_linux.cpp
         Runtime/NodeManager_linux.cpp
     )

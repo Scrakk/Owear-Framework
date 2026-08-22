@@ -28,6 +28,9 @@ public:
     /// Registra un módulo ya vinculado estáticamente (builtins).
     static size_t RegisterStatic(const ow_module_desc_t* desc);
 
+    /// Inyecta el host (emit_event/log) en los helpers de builtins.
+    static void ProvideHostToBuiltins();
+
     /// Libera todas las shared libraries (llamar antes de exit).
     static void Shutdown();
 };

@@ -51,7 +51,51 @@ fs.remove(path, recursive?: boolean): Promise<null>
 fs.exists(path): Promise<boolean>
 ```
 
-### 2.2 `ow-window` (builtin interno — titlebar y ciclo de vida)
+### 2.2 `window` (builtin — extras de ventana, F8)
+
+```ts
+window.openDevTools(windowId, show?)           // inspector WebKit
+window.capturePage(windowId) → {__ow_shm:{id,size}, format:'png'}
+window.setAlwaysOnTop(windowId, bool); window.isAlwaysOnTop(windowId)
+window.setOpacity(windowId, 0..1)
+window.flashFrame(windowId, bool)              // urgencia taskbar/dock
+window.setIcon(windowId, pngB64)
+window.setUserAgent(windowId, ua)
+window.zoom(windowId, factor)                  // 1.0 = 100%
+```
+
+## 2.3 `session` (builtin — cookies/cache/proxy/downloads)
+
+```ts
+session.cookiesGet(url, name?, domain?)
+  → {cookies: [{name,value,domain,path,httpOnly,secure}]}
+session.cookiesSet({name, value, domain, path?, maxAge?})
+session.cookieDelete(url, name) → bool
+session.clearStorage(windowId, {cookies?, localStorage?}?)   // + cache siempre
+session.setProxy(windowId, proxyUrl | 'system')
+session.attach(windowId)                       // habilita eventos de descargas
+session.downloadCancel(downloadId)
+// eventos: session.downloadStarted{downloadId,destination}
+//          session.downloadProgress{downloadId,progress 0..1}
+//          session.downloadFinished{downloadId}
+```
+
+## 2.4 `crashreporter` (builtin)
+
+```ts
+crashreporter.install() → crashDir     // SIGSEGV/ABRT/FPE/BUS/ILL → log+backtrace
+crashreporter.lastCrashLog() → string | null
+```
+
+## 2.5 `capturer` (.owm — X11 v1)
+
+```ts
+capturer.getSources() → [{type:'screen', id, name, bounds, thumbnail:{id,size}}]
+capturer.captureScreen(screenIndex=0) → {__ow_shm, width, height, format:'png'}
+// ⚠ Wayland no soportado v1 (error claro); usar GDK_BACKEND=x11 o portal en F-next
+```
+
+## 2.6 `ow-window` (builtin interno — titlebar y ciclo de vida)
 
 ```ts
 owWindow.minimize(windowId): Promise<null>
@@ -67,7 +111,7 @@ owWindow.beginMoveDrag()                           // arrastrar la ventana
 owWindow.beginResizeDrag(edge: string)
 ```
 
-### 2.3 Módulos propios (.owm) — ABI-C
+### 2.7 Módulos propios (.owm) — ABI-C
 
 ```cpp
 #include <ow/Json.h>

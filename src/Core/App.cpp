@@ -35,11 +35,18 @@ void App::Quit(int exitCode) {
 
 namespace internal {
 
-// Definidos en Modules/fs/fs_module.cpp y Core/WindowModule.cpp.
+// WindowModule.cpp + builtins acoplados al WebView (api/window, api/session,
+// api/crashreporter).
 const ow_module_desc_t* WindowModuleDescriptorImpl();
+const ow_module_desc_t* WindowExtrasDescriptor();
+const ow_module_desc_t* SessionDescriptor();
+const ow_module_desc_t* CrashReporterDescriptor();
 
 void RegisterBuiltinModules() {
     Dispatcher::Get().RegisterModule(WindowModuleDescriptorImpl(), "builtin:ow-window");
+    Dispatcher::Get().RegisterModule(WindowExtrasDescriptor(), "builtin:window");
+    Dispatcher::Get().RegisterModule(SessionDescriptor(), "builtin:session");
+    Dispatcher::Get().RegisterModule(CrashReporterDescriptor(), "builtin:crashreporter");
 }
 
 bool Bootstrap(int argc, char** argv, const AppOptions& options) {
@@ -49,6 +56,7 @@ bool Bootstrap(int argc, char** argv, const AppOptions& options) {
     if (!PlatformInit(argc, argv)) return false;
 
     RegisterBuiltinModules();
+    ModuleLoader::ProvideHostToBuiltins();
 
     size_t loaded = ModuleLoader::LoadAll();
     log::Info("app", "funciones de módulos dinámicos cargadas: " + std::to_string(loaded));

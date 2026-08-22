@@ -110,9 +110,10 @@ void watch(const ow_request_t* req, ow_response_t* res) {
         return RespondError(res, "path requerido");
 
     std::string path = parsed.value->AsArray()[0].AsString();
-    bool recursive = false;
-    if (const Value* v = parsed.value->Find("1"); v && v->IsBool())
-        recursive = v->AsBool();
+    bool recursive = parsed.value->AsArray().size() > 1 &&
+                     parsed.value->AsArray()[1].IsBool()
+                         ? parsed.value->AsArray()[1].AsBool()
+                         : false;
 
     std::error_code ec;
     if (!fs::is_directory(path, ec))
