@@ -26,6 +26,10 @@
   #define OW_SOCK_INVALID (-1)
 #endif
 
+#if defined(__APPLE__)
+#include <fcntl.h> // F_SETFD/FD_CLOEXEC para SetCloexec — fuera de todo namespace
+#endif
+
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -57,10 +61,12 @@ inline int RecvRaw(int fd, char* buf, size_t len) { return static_cast<int>(::re
 
 std::once_flag g_sslInit;
 
-#ifdef __APPLE__
-#include <fcntl.h>
+#if defined(__APPLE__)
 static constexpr int kSockCloexec = 0; // Darwin: no hay SOCK_CLOEXEC
 static void SetCloexec(int fd) { ::fcntl(fd, F_SETFD, FD_CLOEXEC); }
+#elif defined(_WIN32)
+static constexpr int kSockCloexec = 0; // WinSock2: tampoco define SOCK_CLOEXEC
+static void SetCloexec(int) {}
 #else
 static constexpr int kSockCloexec = SOCK_CLOEXEC;
 static void SetCloexec(int) {}

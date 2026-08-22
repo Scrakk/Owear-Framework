@@ -116,7 +116,12 @@ endif()
 # ── Binario del runtime ──────────────────────────────────────────────────────
 add_executable(owear main_kernel.cpp)
 target_link_libraries(owear PRIVATE owear_core)
-if(NOT WIN32)
+if(MSVC)
+    # Los .owm ven __declspec(dllimport) (OW_MODULE_BUILD en include/ow/Shm.h):
+    # el exe del kernel debe exportar los símbolos (en Linux lo cubre -rdynamic).
+    target_link_options(owear PRIVATE
+        "/EXPORT:ow_shm_put" "/EXPORT:ow_shm_data" "/EXPORT:ow_shm_shutdown")
+elseif(NOT WIN32)
     target_link_options(owear PRIVATE -rdynamic) # módulos .owm resuelven ow_shm_* del host
 endif()
 if(OW_PLATFORM STREQUAL "linux")
