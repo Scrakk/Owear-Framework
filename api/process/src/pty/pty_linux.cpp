@@ -7,7 +7,11 @@
 #include "../registry.hpp"
 
 #include <fcntl.h>
+#ifdef __APPLE__
+#include <util.h> // Darwin: forkpty vive aquí (no existe <pty.h>)
+#else
 #include <pty.h>
+#endif
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
