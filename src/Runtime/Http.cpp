@@ -29,6 +29,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <sstream>
 #include <mutex>
 
 namespace ow::http {
@@ -55,6 +56,15 @@ inline int RecvRaw(int fd, char* buf, size_t len) { return static_cast<int>(::re
 #endif
 
 std::once_flag g_sslInit;
+
+#ifdef __APPLE__
+#include <fcntl.h>
+static constexpr int kSockCloexec = 0; // Darwin: no hay SOCK_CLOEXEC
+static void SetCloexec(int fd) { ::fcntl(fd, F_SETFD, FD_CLOEXEC); }
+#else
+static constexpr int kSockCloexec = SOCK_CLOEXEC;
+static void SetCloexec(int) {}
+#endif
 
 struct Url {
     std::string host;
@@ -115,7 +125,7 @@ public:
 #if defined(_WIN32)
             fd_ = static_cast<int>(::socket(p->ai_family, p->ai_socktype, p->ai_protocol));
 #else
-            fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+            fd_ = ::socket(p->ai_family, p->ai_socktype | kSockCloexec, p->ai_protocol);
 #endif
             if (fd_ < 0) continue;
 #if defined(_WIN32)
@@ -216,7 +226,7 @@ public:
 #if defined(_WIN32)
             fd_ = static_cast<int>(::socket(p->ai_family, p->ai_socktype, p->ai_protocol));
 #else
-            fd_ = ::socket(p->ai_family, p->ai_socktype | SOCK_CLOEXEC, p->ai_protocol);
+            fd_ = ::socket(p->ai_family, p->ai_socktype | kSockCloexec, p->ai_protocol);
 #endif
             if (fd_ < 0) continue;
 #if defined(_WIN32)
@@ -236,6 +246,7 @@ public:
         }
         freeaddrinfo(res);
         if (fd_ < 0) { error = "connect falló"; return false; }
+        SetCloexec(fd_);
         return true;
     }
     bool SendAll(const void* d, size_t l) const {
