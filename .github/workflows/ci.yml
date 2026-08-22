@@ -23,35 +23,34 @@ jobs:
       - run: ctest --test-dir build/linux-release --output-on-failure
       - name: E2E headless (suites all/builtins bajo Xvfb)
         run: |
-          MODS=""; for d in build/linux-release/api/*/; do MODS="$MODS$d:"; done
+          sudo apt-get install -y dbus dunst || true
+          export $(dbus-launch)   # session bus para notification/power
+          dunst >/dev/null 2>&1 &
+          MODS=""
+          for d in build/linux-release/api/*/; do MODS="$MODS$d:"; done
           MODS=${MODS%:}
-          # sirve las páginas de prueba desde tests/e2e/www
           (cd tests/e2e/www && python3 -m http.server 8123 >/dev/null 2>&1 &)
+          sleep 0.5
           xvfb-run -a --server-args="-screen 0 1280x800x24" \
             env OW_APP_NAME=CI GDK_BACKEND=x11 OW_MODULES_DIR="$MODS" \
-            timeout 60 python3 tests/e2e/run_suites.py \
-              --pages all.html builtins.html --port 8123 || \
-            echo "::warning::E2E headless con fallos (revisar output)"
+            setsid ./build/linux-release/src/owear > /tmp/owear-e2e.log 2>&1 &
+          sleep 5
+          timeout 150 python3 tests/e2e/run_suites.py \
+            --pages all.html builtins.html --port 8123
 
   windows:
     name: Windows · compile (MSVC + vcpkg zlib/openssl)
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Deps (zlib + openssl vía vcpkg preinstalado)
-        run: |
-          vcpkg install zlib openssl --triplet x64-windows
+        run: vcpkg install zlib openssl --triplet x64-windows
         shell: cmd
       - name: Configure
-        run: cmake --preset windows-release
-        env:
-          CMAKE_TOOLCHAIN_FILE: ${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
+        shell: cmd
+        run: cmake --preset windows-release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
       - name: Build
         run: cmake --build --preset windows-release
-      # WebView2 SDK (NuGet) para el backend de webview: fase siguiente;
-      # hoy el kernel compila sin él si OW_WITH_WEBVIEW2=OFF.
-      - name: Módulos .owm (MinGW cross-check rápido ya cubierto localmente)
-        run: echo "los módulos se compilan como parte del preset"
 
   macos:
     name: macOS · compile (Cocoa/WebKit frameworks)
@@ -62,7 +61,10 @@ jobs:
         run: |
           brew install ninja pkg-config glib openssl@3
           echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
-      - run: cmake --preset macos-release
+      - name: Configure
+        run: |
+          cmake --preset macos-release \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
       - run: cmake --build --preset macos-release
       # Los .mm de Cocoa/WebKit se compilan aquí: errores reales visibles.
 
