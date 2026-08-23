@@ -64,24 +64,43 @@ bool PlatformInit(int argc, char** argv) {
     if (!comOk)
         log::Error("app", "CoInitializeEx falló: " + std::to_string(hr));
 
+    // Fuerza la creación de la cola de mensajes del hilo principal AHORA:
+    // PostThreadMessageW desde el hilo lector pierde el mensaje (devuelve
+    // FALSE sin error visible en nuestro log) si la cola aún no existe.
+    MSG probe;
+    PeekMessageW(&probe, nullptr, 0, 0, PM_NOREMOVE);
+
     // ventana fantasma en el hilo principal: canal de despacho confiable.
     // Si falla, PlatformPost cae al canal viejo (PostThreadMessage).
     WNDCLASSW wc{};
     wc.lpfnWndProc = &PumpWndProc;
     wc.lpszClassName = L"owear-pump";
     wc.hInstance = GetModuleHandleW(nullptr);
-    if (!RegisterClassW(&wc) &&
-        GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+    ATOM atom = RegisterClassW(&wc);
+    if (!atom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         log::Error("app", "RegisterClassW(pump) falló: " +
                               std::to_string(GetLastError()));
+    } else {
+        g_pumpHwnd = CreateWindowExW(0, wc.lpszClassName, nullptr, 0, 0, 0, 0,
+                                     0, HWND_MESSAGE, nullptr, wc.hInstance,
+                                     nullptr);
+        if (!g_pumpHwnd) {
+            DWORD err = GetLastError();
+            log::Warn("app", "ventana pump HWND_MESSAGE no disponible (" +
+                                 std::to_string(err) + ") — reintento normal");
+            // reintento como ventana oculta común (algunos entornos de
+            // sesión no interactiva rechazan message-only windows)
+            g_pumpHwnd = CreateWindowExW(
+                0, wc.lpszClassName, L"", WS_OVERLAPPED, 0, 0, 0, 0, nullptr,
+                nullptr, wc.hInstance, nullptr);
+            if (!g_pumpHwnd) {
+                log::Warn("app", "ventana pump no disponible (" +
+                                     std::to_string(GetLastError()) +
+                                     ") — despacho vía PostThreadMessage");
+            }
+        }
     }
-    g_pumpHwnd = CreateWindowExW(0, wc.lpszClassName, nullptr, 0, 0, 0, 0, 0,
-                                 HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
-    if (!g_pumpHwnd) {
-        log::Warn("app", "ventana pump no disponible (" +
-                             std::to_string(GetLastError()) +
-                             ") — despacho vía PostThreadMessage");
-    }
+    if (g_pumpHwnd) log::Info("app", "pump window lista");
 
     // tolerante: el kernel arranca aunque el pump window no exista
     return true;
@@ -95,12 +114,15 @@ void PlatformPost(std::function<void()> fn) {
         g_pending.push(std::move(fn));
     }
     if (!wake) return;
-    if (g_pumpHwnd &&
-        !PostMessageW(g_pumpHwnd, kWmOwPump, 0, 0)) {
-        log::Error("app", "PostMessage de despacho falló: " +
-                              std::to_string(GetLastError()));
-        // reintento por el canal viejo antes de rendirse
-        PostThreadMessageW(g_mainThreadId, kWmOwPump, 0, 0);
+    if (g_pumpHwnd && PostMessageW(g_pumpHwnd, kWmOwPump, 0, 0)) return;
+    // canal viejo: PostThreadMessage exige que la cola del destino exista
+    // (PlatformInit la crea con PeekMessage PM_NOREMOVE); si falla lo
+    // registramos — perder este mensaje = respuesta nunca entregada.
+    if (!PostThreadMessageW(g_mainThreadId, kWmOwPump, 0, 0)) {
+        log::Error("app", "despacho perdido: PostThreadMessageW falló (" +
+                              std::to_string(GetLastError()) + ")");
+    } else if (g_pumpHwnd) {
+        log::Warn("app", "despacho vía PostThreadMessage (fallback)");
     }
 }
 
