@@ -63,6 +63,8 @@ if(OW_PLATFORM STREQUAL "linux")
         Runtime/NodeManager_linux.cpp
     )
 elseif(OW_PLATFORM STREQUAL "win")
+    find_package(OpenSSL REQUIRED) # Http.cpp (TLS): el toolchain de vcpkg da
+                                   # los headers, pero el .lib hay que enlazarlo
     list(APPEND OW_KERNEL_SOURCES
         Core/App_win.cpp
         Window/window_win.cpp
@@ -97,6 +99,10 @@ target_include_directories(owear_core PUBLIC
 target_compile_definitions(owear_core PUBLIC OW_VERSION_STRING="0.1.0")
 
 target_link_libraries(owear_core PUBLIC Threads::Threads ZLIB::ZLIB)
+
+if(OW_PLATFORM STREQUAL "win")
+    target_link_libraries(owear_core PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+endif()
 
 if(OW_PLATFORM STREQUAL "linux")
     target_include_directories(owear_core PRIVATE

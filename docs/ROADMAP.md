@@ -99,3 +99,14 @@ Total: **19 módulos** (15 .owm + 4+1 builtins), 32 pruebas E2E base en verde
 
 Pendiente menor: printToPDF (sin API directa en WebKitGTK v2.52), tray menús,
 webRequest interceptor, Wayland capture (portal).
+
+## CI 3 plataformas
+- Linux: build + ctest + E2E headless (Xvfb + dbus/dunst) — VERDE.
+- Windows: compila con vcpkg (zlib/openssl). Backend WebView2 gateado tras
+  `OW_WITH_WEBVIEW2` (default OFF): sin SDK compila un stub
+  `CreateWebviewBackend() → nullptr` con log claro. Activarlo requiere el
+  NuGet Microsoft.Web.WebView2 (ver pendiente 1).
+- macOS: OpenSSL/GLib vía Homebrew (link dirs keg-only), módulos .owm con
+  `-undefined dynamic_lookup`, forkpty vía <util.h>. VERIFICAR-EN-DESKTOP-REAL
+  para lo marcado arriba.
+
