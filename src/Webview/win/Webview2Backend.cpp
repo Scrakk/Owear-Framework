@@ -65,8 +65,32 @@ std::wstring UserDataDir() {
     } else {
         dir = L".\\owear-webview2";
     }
-    std::filesystem::create_directories(dir);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec); // no-lanzante
     return dir;
+}
+
+// Envoltorio SEH: CreateCoreWebView2EnvironmentWithOptions puede morir con
+// fail-fast (no capturable por try/catch ni por el filtro global). La llamada
+// real vive en EnvCreateInner (puede usar objetos C++); la función SEH solo
+// delega (en su frame no hay nada destructible — requisito /EHsc).
+namespace {
+struct EnvCreateArgs {
+    ICoreWebView2EnvironmentOptions* opts;
+    const wchar_t* userDataDir;
+    void* self;
+};
+
+HRESULT EnvCreateInner(EnvCreateArgs* a);
+} // namespace
+
+static HRESULT EnvCreateSeh(EnvCreateArgs* a, unsigned long* sehCode) {
+    __try {
+        return EnvCreateInner(a);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *sehCode = static_cast<unsigned long>(GetExceptionCode());
+        return E_FAIL;
+    }
 }
 
 class Webview2Backend final : public IWebviewBackend {
@@ -106,38 +130,63 @@ private:
         log::Info("webview2", "opciones listas, user data dir: " +
                                   WideToUtf8(UserDataDir().c_str()));
 
-        HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
-            nullptr, UserDataDir().c_str(), envOptions.Get(),
-            Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-                [this](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-                    if (FAILED(result)) {
-                        log::Error("webview2", "environment falló");
-                        return E_FAIL;
-                    }
-                    environment_ = env;
-                    return env->CreateCoreWebView2Controller(
-                        hwnd_,
-                        Callback<
-                            ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                            [this](HRESULT result, ICoreWebView2Controller* ctrl)
-                                -> HRESULT {
-                                if (FAILED(result) || !ctrl) {
-                                    log::Error("webview2", "controller falló");
-                                    return E_FAIL;
-                                }
-                                controller_ = ctrl;
-                                controller_->get_CoreWebView2(&webview_);
-                                OnControllerReady();
-                                return S_OK;
-                            })
-                            .Get());
-                })
-                .Get());
+        // ¿hay runtime Evergreen instalado? (API de diagnóstico segura)
+        LPWSTR ver = nullptr;
+        HRESULT hvr = GetAvailableCoreWebView2BrowserVersionString(
+            nullptr, &ver);
+        log::Info("webview2",
+                  "runtime: hr=0x" +
+                      std::to_string(static_cast<unsigned long>(hvr)) + " ver=" +
+                      (ver ? WideToUtf8(ver) : "(null)"));
+        if (ver) CoTaskMemFree(ver);
 
-        return SUCCEEDED(hr);
+        std::wstring userDataDir = UserDataDir();
+        ICoreWebView2EnvironmentOptions* rawOpts =
+            args.empty() ? nullptr : envOptions.Get();
+        EnvCreateArgs a{rawOpts, userDataDir.c_str(), this};
+        unsigned long sehCode = 0;
+        HRESULT hr = EnvCreateSeh(&a, &sehCode);
+        if (sehCode != 0) {
+            log::Error("webview2", "SEH dentro de CreateCoreWebView2Environment"
+                                   "WithOptions: 0x" +
+                                       std::to_string(sehCode));
+            return false;
+        }
+        if (FAILED(hr)) {
+            log::Error("webview2", "CreateCoreWebView2EnvironmentWithOptions "
+                                   "devolvió 0x" +
+                                       std::to_string(
+                                           static_cast<unsigned long>(hr)));
+            return false;
+        }
+
+        // el environment llega por callback (asíncrono); Create devuelve true
+        return true;
     }
 
 public:
+    void OnEnvironmentReady(ICoreWebView2Environment* env) {
+        environment_ = env;
+        HRESULT hr = env->CreateCoreWebView2Controller(
+            hwnd_,
+            Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                [this](HRESULT result, ICoreWebView2Controller* ctrl) -> HRESULT {
+                    if (FAILED(result) || !ctrl) {
+                        log::Error("webview2", "controller falló");
+                        return E_FAIL;
+                    }
+                    controller_ = ctrl;
+                    controller_->get_CoreWebView2(&webview_);
+                    OnControllerReady();
+                    return S_OK;
+                })
+                .Get());
+        if (FAILED(hr))
+            log::Error("webview2", "CreateCoreWebView2Controller devolvió 0x" +
+                                       std::to_string(
+                                           static_cast<unsigned long>(hr)));
+    }
+
     void OnControllerReady() {
         // scripts de init encolados antes de que existiera el webview
         for (const auto& js : pendingInitScripts_)
@@ -256,6 +305,24 @@ private:
 };
 
 } // namespace
+
+// Definición fuera del namespace anónimo: EnvCreateSeh (arriba, con __try)
+// la forward-declara. El callback captura `this` vía el puntero del struct.
+HRESULT EnvCreateInner(EnvCreateArgs* a) {
+    auto* self = static_cast<Webview2Backend*>(a->self);
+    return CreateCoreWebView2EnvironmentWithOptions(
+        nullptr, a->userDataDir, a->opts,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [self](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+                if (FAILED(result)) {
+                    log::Error("webview2", "environment falló");
+                    return E_FAIL;
+                }
+                self->OnEnvironmentReady(env);
+                return S_OK;
+            })
+            .Get());
+}
 
 std::unique_ptr<IWebviewBackend> CreateWebviewBackend() {
     return std::make_unique<Webview2Backend>();
