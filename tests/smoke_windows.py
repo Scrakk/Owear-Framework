@@ -76,6 +76,10 @@ def rpc(f, req_id, cmd, params=None):
 
 h = connect()
 
+# round-trip puro del control socket (sin UI): valida pipe+NDJSON+respuesta
+r = rpc(h, 0, "app.info")
+print(f"[smoke] app.info → ok={r.get('ok')}")
+
 r = rpc(h, 1, "window.create",
         {"title": "owear-smoke",
          "url": "data:text/html,<h1>owear smoke</h1>",

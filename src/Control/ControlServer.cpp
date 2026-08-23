@@ -322,6 +322,9 @@ void ControlServer::HandleLine(uint64_t clientId, std::string_view line) {
 
     if (cmd.empty()) return;
 
+    // traza de diagnóstico: qué comando entra y desde qué hilo muere el flujo
+    log::Info("control", "cmd: " + cmd);
+
     // Eventos JS→nativo vía SDK (sin id)
     if (cmd == "event.emit") {
         // reenvía al renderer destino si trae windowId
