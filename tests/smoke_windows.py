@@ -94,7 +94,7 @@ h = connect()
 
 # round-trip puro del control socket (sin UI): valida pipe+NDJSON+respuesta
 r = rpc(h, 0, "app.info")
-print(f"[smoke] app.info → ok={r.get('ok')}")
+print(f"[smoke] app.info ok={r.get('ok')}")  # sin unicode: consola cp1252
 
 r = rpc(h, 1, "window.create",
         {"title": "owear-smoke",
