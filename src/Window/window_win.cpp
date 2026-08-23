@@ -163,6 +163,7 @@ Window::Impl::~Impl() {
 }
 
 bool Window::Impl::PCreate() {
+    log::Info("window", "PCreate: inicio");
     pdata = new PlatformData();
     RegisterClassOnce();
 
@@ -178,7 +179,12 @@ bool Window::Impl::PCreate() {
     HWND hwnd = CreateWindowExW(0, kOwWindowClass, title.c_str(), style,
                                 CW_USEDEFAULT, CW_USEDEFAULT, opts.width, opts.height,
                                 nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (!hwnd) return false;
+    if (!hwnd) {
+        log::Error("window", "CreateWindowExW falló: " +
+                                 std::to_string(GetLastError()));
+        return false;
+    }
+    log::Info("window", "PCreate: hwnd creado");
 
     pdata->hwnd = hwnd;
     HwndMap()[hwnd] = this;
@@ -191,7 +197,11 @@ bool Window::Impl::PCreate() {
         SetWindowLongW(hwnd, GWL_STYLE, s & ~(WS_THICKFRAME | WS_MAXIMIZEBOX));
     }
 
-    if (!webview->Create(hwnd, opts.webviewArgs)) return false;
+    log::Info("window", "PCreate: webview->Create");
+    if (!webview->Create(hwnd, opts.webviewArgs)) {
+        log::Error("window", "backend webview rechazó la creación");
+        return false;
+    }
 
     const char* assetsDir = std::getenv("OW_ASSETS_DIR");
     if (assetsDir && *assetsDir)
@@ -200,6 +210,7 @@ bool Window::Impl::PCreate() {
         webview->RegisterAssetScheme("app", std::filesystem::current_path() / "dist");
 
     if (opts.show) ShowWindow(hwnd, SW_SHOW);
+    log::Info("window", "PCreate: ok");
     return true;
 }
 

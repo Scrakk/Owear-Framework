@@ -51,12 +51,23 @@ LRESULT CALLBACK PumpWndProc(HWND h, UINT m, WPARAM, LPARAM) {
     }
     return DefWindowProcW(h, m, 0, 0);
 }
+
+// Diagnóstico: los crashes silenciosos (p.ej. en la creación de WebView2)
+// matan el proceso sin una sola línea de log. Esto registra al menos el
+// código de excepción y el módulo donde ocurrió.
+LONG WINAPI OwUnhandledFilter(EXCEPTION_POINTERS* info) {
+    log::Error("app", "excepción no manejada: código 0x" +
+                          std::to_string(static_cast<unsigned long>(
+                              info->ExceptionRecord->ExceptionCode)));
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 } // namespace
 
 bool PlatformInit(int argc, char** argv) {
     (void)argc;
     (void)argv;
     g_mainThreadId = GetCurrentThreadId();
+    SetUnhandledExceptionFilter(&OwUnhandledFilter);
 
     // COM apartment single-threaded para WebView2
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
