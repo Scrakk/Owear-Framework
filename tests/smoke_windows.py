@@ -17,6 +17,9 @@ k32.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
                             ctypes.c_void_p]
 k32.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
                          ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+k32.PeekNamedPipe.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                              ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32),
+                              ctypes.c_void_p]
 k32.WriteFile.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32,
                           ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
 
@@ -53,19 +56,32 @@ def write_all(h, data: bytes):
         off += n.value
 
 
-def read_line(h) -> bytes:
+def read_line(h, timeout=10) -> bytes:
+    # PeekNamedPipe en bucle: ReadFile bloqueante sin datos = cuelgue de horas
+    # (mordido 2 veces en CI). Con deadline el smoke falla solo.
     buf = ctypes.create_string_buffer(4096)
     acc = b""
-    while True:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        avail = ctypes.c_uint32(0)
+        if not k32.PeekNamedPipe(h, None, 0, None, ctypes.byref(avail), None):
+            print("[smoke] pipe cerrada por el kernel (PeekNamedPipe falló)",
+                  file=sys.stderr)
+            sys.exit(4)
+        if avail.value == 0:
+            time.sleep(0.05)
+            continue
         n = ctypes.c_uint32(0)
         if not k32.ReadFile(h, buf, 4096, ctypes.byref(n), None) or n.value == 0:
-            print("[smoke] ReadFile falló o conexión cerrada",
-                  file=sys.stderr)
+            print("[smoke] ReadFile falló o conexión cerrada", file=sys.stderr)
             sys.exit(4)
         acc += buf.raw[:n.value]
         i = acc.find(b"\n")
         if i >= 0:
             return acc[:i]
+    print(f"[smoke] timeout de {timeout}s esperando respuesta del kernel",
+          file=sys.stderr)
+    sys.exit(6)
 
 
 def rpc(f, req_id, cmd, params=None):

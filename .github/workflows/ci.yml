@@ -54,6 +54,7 @@ jobs:
         run: cmake --build --preset windows-release
       - name: Smoke test E2E (kernel + módulos + ventana WebView2 real)
         shell: pwsh
+        timeout-minutes: 5
         run: |
           $exe = "build\windows-release\src\Release\owear.exe"
           if (!(Test-Path $exe)) { $exe = "build\windows-release\src\Debug\owear.exe" }
