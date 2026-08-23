@@ -61,18 +61,30 @@ bool PlatformInit(int argc, char** argv) {
     // COM apartment single-threaded para WebView2
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     bool comOk = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+    if (!comOk)
+        log::Error("app", "CoInitializeEx falló: " + std::to_string(hr));
 
-    // ventana fantasma en el hilo principal: canal de despacho confiable
-    // (PostThreadMessage es más frágil: fallos silenciosos y colas tempranas)
+    // ventana fantasma en el hilo principal: canal de despacho confiable.
+    // Si falla, PlatformPost cae al canal viejo (PostThreadMessage).
     WNDCLASSW wc{};
     wc.lpfnWndProc = &PumpWndProc;
     wc.lpszClassName = L"owear-pump";
     wc.hInstance = GetModuleHandleW(nullptr);
-    RegisterClassW(&wc);
+    if (!RegisterClassW(&wc) &&
+        GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        log::Error("app", "RegisterClassW(pump) falló: " +
+                              std::to_string(GetLastError()));
+    }
     g_pumpHwnd = CreateWindowExW(0, wc.lpszClassName, nullptr, 0, 0, 0, 0, 0,
                                  HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+    if (!g_pumpHwnd) {
+        log::Warn("app", "ventana pump no disponible (" +
+                             std::to_string(GetLastError()) +
+                             ") — despacho vía PostThreadMessage");
+    }
 
-    return comOk && g_pumpHwnd != nullptr;
+    // tolerante: el kernel arranca aunque el pump window no exista
+    return true;
 }
 
 void PlatformPost(std::function<void()> fn) {
