@@ -75,10 +75,13 @@ public:
                       static_cast<unsigned long>(GetCurrentProcessId()));
         socketPath_ = name;
 
-        // pipe duplex por mensaje; aceptamos un cliente a la vez (SDK único)
+        // pipe duplex por mensaje; aceptamos un cliente a la vez (SDK único).
+        // SIN FILE_FLAG_OVERLAPPED: todo el I/O de este hilo es bloqueante
+        // (ConnectNamedPipe/ReadFile/WriteFile con OVERLAPPED=nullptr exige
+        // handle síncrono; con overlapped+nullptr el comportamiento es indefinido).
         pipe_ = CreateNamedPipeA(
             name,
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             4,   // instancias
             64 * 1024, 64 * 1024, 0, nullptr);
@@ -138,7 +141,7 @@ private:
             if (running_) {
                 pipe_ = CreateNamedPipeA(
                     socketPath_.c_str(),
-                    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                    PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
                     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                     4, 64 * 1024, 64 * 1024, 0, nullptr);
             }
@@ -174,7 +177,7 @@ private:
         if (running_) {
             pipe_ = CreateNamedPipeA(
                 socketPath_.c_str(),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 4, 64 * 1024, 64 * 1024, 0, nullptr);
         }
