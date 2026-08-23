@@ -93,13 +93,21 @@ public:
     }
 
     void PlatformSend(uint64_t clientId, std::string_view line) override {
-        std::lock_guard lock(sendMu_);
-        if (clientId == 0) {
-            for (auto& [id, buf] : clients_) WriteClient(buf, line);
-            return;
+        // NO escribir aquí: este lo llama el hilo principal y el handle del
+        // pipe está síncrono-bloqueado en ReadFile por el hilo lector (I/O
+        // serializada en el mismo handle = la escritura no saldría hasta
+        // que el lector desbloquee). Encolamos y despertamos al lector.
+        {
+            std::lock_guard lock(outboxMu_);
+            if (clientId == 0) {
+                for (auto& [id, c] : clients_)
+                    outbox_.push_back({id, std::string(line) + '\n'});
+            } else if (clients_.count(clientId)) {
+                outbox_.push_back({clientId, std::string(line) + '\n'});
+            }
         }
-        if (auto it = clients_.find(clientId); it != clients_.end())
-            WriteClient(it->second, line);
+        if (pipe_ != INVALID_HANDLE_VALUE)
+            CancelIoEx(pipe_, nullptr); // aborta el ReadFile para que drene
     }
 
     void PlatformStop() override {
@@ -166,11 +174,17 @@ private:
         }
 
         uint64_t id = nextClientId_++;
-        clients_[id] = ClientBuf{pipe_, {}};
-        activeHandle_ = pipe_;
+        {
+            std::lock_guard lock(clientsMu_);
+            clients_[id] = ClientBuf{pipe_, {}};
+        }
 
         auto processChunk = [&](const char* data, DWORD len) {
-            auto& acc = clients_[id].pending;
+            std::string acc;
+            {
+                std::lock_guard lock(clientsMu_);
+                acc = std::move(clients_[id].pending);
+            }
             acc.append(data, len);
             size_t pos;
             while ((pos = acc.find('\n')) != std::string::npos) {
@@ -182,20 +196,56 @@ private:
                 // lector queda dedicado exclusivamente a I/O del pipe.
                 App::Post([this, id, line] { HandleLine(id, line); });
             }
+            std::lock_guard lock(clientsMu_);
+            clients_[id].pending = std::move(acc);
         };
         processChunk(buf, n);
 
-        // lee hasta desconexión (un cliente por instancia v1)
+        // lee hasta desconexión (un cliente por instancia v1). CancelIoEx
+        // (desde PlatformSend) aborta este ReadFile para que drene el outbox
+        // de respuestas: I/O síncrona en un handle es serializada, así que
+        // escribir desde otro hilo aquí colgaría detrás de este ReadFile.
         while (running_) {
-            if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) break;
+            if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) {
+                if (GetLastError() == ERROR_OPERATION_ABORTED) {
+                    DrainOutbox();
+                    continue;
+                }
+                break;
+            }
             processChunk(buf, n);
+            DrainOutbox();
         }
-        std::lock_guard lock(sendMu_);
-        clients_.erase(id);
+        {
+            std::lock_guard lock(clientsMu_);
+            clients_.erase(id);
+        }
         DisconnectNamedPipe(pipe_);
         // recrea instancia para el siguiente cliente
         if (running_) RecreatePipe();
     }
+
+private:
+    void DrainOutbox() {
+        std::vector<std::pair<uint64_t, std::string>> batch;
+        {
+            std::lock_guard lock(outboxMu_);
+            batch.swap(outbox_);
+        }
+        for (auto& [id, payload] : batch) {
+            HANDLE h = INVALID_HANDLE_VALUE;
+            {
+                std::lock_guard lock(clientsMu_);
+                if (auto it = clients_.find(id); it != clients_.end())
+                    h = it->second.handle;
+            }
+            if (h == INVALID_HANDLE_VALUE) continue;
+            ClientBuf tmp{h, {}};
+            WriteClient(tmp, payload);
+        }
+    }
+
+public:
 
     void ReaderLoop() {
         while (running_) AcceptOne();
@@ -204,10 +254,11 @@ private:
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
     std::thread readerThread_;
     std::atomic<bool> running_{true};
+    std::mutex clientsMu_;
     std::map<uint64_t, ClientBuf> clients_;
-    std::mutex sendMu_;
+    std::mutex outboxMu_;
+    std::vector<std::pair<uint64_t, std::string>> outbox_;
     uint64_t nextClientId_ = 1;
-    HANDLE activeHandle_ = INVALID_HANDLE_VALUE;
 };
 
 } // namespace
