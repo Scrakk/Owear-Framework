@@ -74,7 +74,20 @@ public:
     bool Create(void* parentNativeWindow, const std::vector<std::string>& args) override {
         hwnd_ = static_cast<HWND>(parentNativeWindow);
         if (!hwnd_) return false;
+        try {
+            return CreateInner(parentNativeWindow, args);
+        } catch (const std::exception& e) {
+            log::Error("webview2", std::string("excepción en Create: ") +
+                                       e.what());
+            return false;
+        } catch (...) {
+            log::Error("webview2", "excepción desconocida en Create");
+            return false;
+        }
+    }
 
+private:
+    bool CreateInner(void* parentNativeWindow, const std::vector<std::string>& args) {
         // COM apartment en el hilo de UI (requisito de WebView2)
         thread_local bool comInit = false;
         if (!comInit) {
@@ -90,6 +103,8 @@ public:
             }
             envOptions->put_AdditionalBrowserArguments(joined.c_str());
         }
+        log::Info("webview2", "opciones listas, user data dir: " +
+                                  WideToUtf8(UserDataDir().c_str()));
 
         HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
             nullptr, UserDataDir().c_str(), envOptions.Get(),
@@ -122,6 +137,7 @@ public:
         return SUCCEEDED(hr);
     }
 
+public:
     void OnControllerReady() {
         // scripts de init encolados antes de que existiera el webview
         for (const auto& js : pendingInitScripts_)
