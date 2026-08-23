@@ -10,6 +10,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+if(APPLE)
+    # CGDisplayCreateImage et al: disponibles hasta que el target sea ≥ 15
+    set(CMAKE_OSX_DEPLOYMENT_TARGET
+        "13.0" CACHE STRING "macOS deployment target" FORCE)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()

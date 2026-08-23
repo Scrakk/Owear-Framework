@@ -10,6 +10,7 @@
 #import <ImageIO/ImageIO.h>
 
 #include "ow/Json.h"
+#include "ow/Module.h"
 #include "ow/Shm.h"
 #include "ow_api.h"
 
