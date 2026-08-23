@@ -29,6 +29,10 @@ if(OW_PLATFORM STREQUAL "linux")
     endif()
 endif()
 
+if(OW_PLATFORM STREQUAL "mac")
+    set(TRAY_LIBS_STR "-framework Cocoa")
+endif()
+
 ow_add_module(tray
     SOURCES src/tray_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${TRAY_LIBS_STR})

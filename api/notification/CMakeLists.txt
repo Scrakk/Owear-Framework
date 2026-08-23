@@ -1,3 +1,6 @@
+if(OW_PLATFORM STREQUAL "mac")
+    set(OW_NOTIF_LIBS "-framework Cocoa" "-framework UserNotifications")
+endif()
 ow_add_module(notification    SOURCES src/notification_${OW_PLATFORM}.${OW_SRC_EXT}
-    LIBS ${OW_GUI_LIBS}
+    LIBS ${OW_GUI_LIBS} ${OW_NOTIF_LIBS}
     INCLUDES ${OW_GUI_INCS})

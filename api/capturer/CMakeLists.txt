@@ -5,7 +5,10 @@ if(OW_PLATFORM STREQUAL "linux")
         return()
     endif()
 endif()
+if(OW_PLATFORM STREQUAL "mac")
+    set(OW_CAP_LIBS "-framework Cocoa" "-framework ImageIO")
+endif()
 ow_add_module(capturer
     SOURCES src/capturer_${OW_PLATFORM}.${OW_SRC_EXT}
-    LIBS ${OW_GUI_LIBS}
+    LIBS ${OW_GUI_LIBS} ${OW_CAP_LIBS}
     INCLUDES ${OW_GUI_INCS})

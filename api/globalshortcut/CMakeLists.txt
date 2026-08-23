@@ -6,6 +6,9 @@ if(OW_PLATFORM STREQUAL "linux")
     endif()
     set(GS_LIBS ${X11_LIBRARIES})
 endif()
+if(OW_PLATFORM STREQUAL "mac")
+    set(GS_LIBS "-framework Carbon")
+endif()
 ow_add_module(globalshortcut
     SOURCES src/gs_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${GS_LIBS} ${OW_GUI_LIBS}
