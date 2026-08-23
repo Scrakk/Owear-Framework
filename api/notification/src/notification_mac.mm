@@ -77,7 +77,10 @@ void show(const ow_request_t* req, ow_response_t* res) {
                                                        @"owear-%lld", s_nextId]
                                    content:content
                                    trigger:nil];
-                [c addNotificationRequest:rq withCompletionHandler:^{}];
+                [c addNotificationRequest:rq
+                    withCompletionHandler:^(NSError* _Nullable err) {
+                      (void)err;
+                    }];
                 delivered = true;
             }
         } @catch (NSException*) {

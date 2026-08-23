@@ -22,6 +22,9 @@ using ow::Module::RespondOk;
 
 static const ow_module_host_t* g_host = nullptr;
 
+} // namespace menu
+
+// Objetos ObjC fuera del namespace C++ (mismo patrón que WKWebviewBackend)
 @interface OwMenuTarget : NSObject
 @property(nonatomic, copy) void (^block)(void);
 - (void)fire:(id)sender;
@@ -31,6 +34,8 @@ static const ow_module_host_t* g_host = nullptr;
     if (self.block) self.block();
 }
 @end
+
+namespace menu {
 
 static void AppendItems(NSMenu* m, const Array& items, uint32_t win) {
     for (const auto& it : items) {
