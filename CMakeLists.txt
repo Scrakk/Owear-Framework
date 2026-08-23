@@ -24,7 +24,8 @@ option(OW_BUILD_DEMO    "Build the demo host app"        ON)
 option(OW_BUILD_MODULES "Build stock modules (fs, ...)"  ON)
 option(OW_BUILD_TESTS   "Build unit tests"               ON)
 option(OW_WARNINGS_AS_ERRORS "Treat warnings as errors"  OFF)
-option(OW_WITH_WEBVIEW2 "Compile the WebView2 backend (requires WebView2 SDK headers)" OFF)
+# OW_WITH_WEBVIEW2 se AUTO-DETECTA en src/CMakeLists.txt según exista
+# deps/webview2/include/WebView2.h — override con -DOW_WITH_WEBVIEW2=ON/OFF.
 
 # ── Platform detection (drives source selection; NO #ifdef feature gates) ──
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

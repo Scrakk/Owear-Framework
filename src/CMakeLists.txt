@@ -65,6 +65,20 @@ if(OW_PLATFORM STREQUAL "linux")
 elseif(OW_PLATFORM STREQUAL "win")
     find_package(OpenSSL REQUIRED) # Http.cpp (TLS): el toolchain de vcpkg da
                                    # los headers, pero el .lib hay que enlazarlo
+    # ── WebView2: auto-detección del SDK vendido (patrón deps/ de ole) ──────
+    if(NOT DEFINED OW_WITH_WEBVIEW2)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/deps/webview2/include/WebView2.h")
+            set(OW_WITH_WEBVIEW2 ON)
+        else()
+            set(OW_WITH_WEBVIEW2 OFF)
+        endif()
+    elseif(OW_WITH_WEBVIEW2 AND
+           NOT EXISTS "${CMAKE_SOURCE_DIR}/deps/webview2/include/WebView2.h")
+        message(WARNING "OW_WITH_WEBVIEW2=ON pero falta deps/webview2 — stub")
+        set(OW_WITH_WEBVIEW2 OFF)
+    endif()
+    message(STATUS "Owear backend WebView2: ${OW_WITH_WEBVIEW2}")
+
     list(APPEND OW_KERNEL_SOURCES
         Core/App_win.cpp
         Window/window_win.cpp
@@ -102,6 +116,12 @@ target_link_libraries(owear_core PUBLIC Threads::Threads ZLIB::ZLIB)
 
 if(OW_PLATFORM STREQUAL "win")
     target_link_libraries(owear_core PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    if(OW_WITH_WEBVIEW2)
+        target_include_directories(owear_core PRIVATE
+            ${CMAKE_SOURCE_DIR}/deps/webview2/include)
+        target_link_libraries(owear_core PUBLIC
+            "${CMAKE_SOURCE_DIR}/deps/webview2/lib/x64/WebView2LoaderStatic.lib")
+    endif()
 endif()
 
 if(OW_PLATFORM STREQUAL "linux")

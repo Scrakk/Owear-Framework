@@ -52,27 +52,39 @@ jobs:
         run: cmake --preset windows-release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
       - name: Build
         run: cmake --build --preset windows-release
-      - name: Smoke test (kernel vivo + carga de módulos .dll)
+      - name: Smoke test E2E (kernel + módulos + ventana WebView2 real)
         shell: pwsh
         run: |
           $exe = "build\windows-release\src\Release\owear.exe"
           if (!(Test-Path $exe)) { $exe = "build\windows-release\src\Debug\owear.exe" }
           Write-Host "exe=$exe"
+          if (!(Test-Path "build\windows-release\src\Release\owear.exe") -and !(Test-Path "build\windows-release\src\Debug\owear.exe")) {
+            Write-Error "owear.exe no existe"; exit 1
+          }
           $mods = (Get-ChildItem "build\windows-release\api" -Directory | ForEach-Object {
               if (Test-Path "$($_.FullName)\Release") { "$($_.FullName)\Release" }
             }) -join ";"
           Write-Host "OW_MODULES_DIR=$mods"
           $env:OW_APP_NAME = "CI"
           $env:OW_MODULES_DIR = $mods
-          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow -RedirectStandardError "owear-smoke.err.log"
-          Start-Sleep -Seconds 8
-          if ($proc.HasExited) {
-            Get-Content "owear-smoke.err.log" | ForEach-Object { Write-Host $_ }
-            Write-Error "el kernel murió en el arranque (exit $($proc.ExitCode))"
+          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow `
+                    -RedirectStandardError "owear-smoke.err.log" `
+                    -RedirectStandardOutput "owear-smoke.out.log"
+          python tests/smoke_windows.py $proc.Id
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::group::stderr del kernel"; Get-Content "owear-smoke.err.log"; Write-Host "::endgroup::"
+            Write-Host "::group::stdout del kernel"; Get-Content "owear-smoke.out.log"; Write-Host "::endgroup::"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Error "smoke E2E falló (código $LASTEXITCODE)"
             exit 1
           }
-          Stop-Process -Id $proc.Id -Force
-          Write-Host "smoke OK: kernel vivo tras 8s con $($mods.Split(';').Count) módulos cargados"
+          $proc.WaitForExit(20000) | Out-Null
+          if (-not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force
+            Write-Error "el kernel no salió tras app.quit"
+            exit 1
+          }
+          Write-Host "smoke E2E OK: ventana WebView2 creada y salida limpia (exit $($proc.ExitCode))"
 
   macos:
     name: macOS · compile + smoke (Cocoa/WebKit frameworks)

@@ -17,9 +17,15 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shlobj.h>
+
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shell32.lib")
 
 #include <WebView2.h>
-#include <wrl.h>
+#include <WebView2EnvironmentOptions.h>
+#include <wrl/client.h>
+#include <wrl/event.h>
 
 #include <filesystem>
 #include <string>
@@ -47,11 +53,34 @@ std::string WideToUtf8(const wchar_t* w) {
     return s;
 }
 
+// Perfil de usuario fuera del dir del exe (puede ser read-only en installs
+// de sistema) — patrón GetUserDataDir de ole/browser_host.
+std::wstring UserDataDir() {
+    PWSTR local = nullptr;
+    std::wstring dir;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr,
+                                       &local))) {
+        dir = std::wstring(local) + L"\\owear\\WebView2";
+        CoTaskMemFree(local);
+    } else {
+        dir = L".\\owear-webview2";
+    }
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
 class Webview2Backend final : public IWebviewBackend {
 public:
     bool Create(void* parentNativeWindow, const std::vector<std::string>& args) override {
         hwnd_ = static_cast<HWND>(parentNativeWindow);
         if (!hwnd_) return false;
+
+        // COM apartment en el hilo de UI (requisito de WebView2)
+        thread_local bool comInit = false;
+        if (!comInit) {
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            comInit = true;
+        }
 
         auto envOptions = Make<CoreWebView2EnvironmentOptions>();
         if (!args.empty()) {
@@ -63,7 +92,7 @@ public:
         }
 
         HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
-            nullptr, nullptr, envOptions.Get(),
+            nullptr, UserDataDir().c_str(), envOptions.Get(),
             Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
                 [this](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
                     if (FAILED(result)) {
