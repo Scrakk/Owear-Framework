@@ -40,7 +40,7 @@ jobs:
           { echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::"; exit 1; }
 
   windows:
-    name: Windows · compile (MSVC + vcpkg zlib/openssl)
+    name: Windows · compile + smoke (MSVC + vcpkg zlib/openssl)
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +52,22 @@ jobs:
         run: cmake --preset windows-release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
       - name: Build
         run: cmake --build --preset windows-release
+      - name: Smoke test (kernel vivo + carga de módulos .dll)
+        shell: pwsh
+        run: |
+          $mods = (Get-ChildItem "build\windows-release\api" -Directory | ForEach-Object { "$($_.FullName)" }) -join ";"
+          Write-Host "OW_MODULES_DIR=$mods"
+          $env:OW_APP_NAME = "CI"
+          $env:OW_MODULES_DIR = $mods
+          $proc = Start-Process -FilePath "build\windows-release\src\owear.exe" -PassThru -NoNewWindow -RedirectStandardError "owear-smoke.err.log"
+          Start-Sleep -Seconds 8
+          if ($proc.HasExited) {
+            Get-Content "owear-smoke.err.log" | ForEach-Object { Write-Host $_ }
+            Write-Error "el kernel murió en el arranque (exit $($proc.ExitCode))"
+            exit 1
+          }
+          Stop-Process -Id $proc.Id -Force
+          Write-Host "smoke OK: kernel vivo tras 8s con $($mods.Split(';').Count) módulos cargados"
 
   macos:
     name: macOS · compile (Cocoa/WebKit frameworks)
