@@ -8,6 +8,9 @@ endif()
 if(OW_PLATFORM STREQUAL "mac")
     set(OW_CAP_LIBS "-framework Cocoa" "-framework ImageIO")
 endif()
+if(OW_PLATFORM STREQUAL "win")
+    set(OW_CAP_LIBS Gdiplus Ole32 User32)
+endif()
 ow_add_module(capturer
     SOURCES src/capturer_${OW_PLATFORM}.${OW_SRC_EXT}
     LIBS ${OW_GUI_LIBS} ${OW_CAP_LIBS}

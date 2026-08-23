@@ -32,6 +32,10 @@ endif()
 if(OW_PLATFORM STREQUAL "mac")
     set(TRAY_LIBS_STR "-framework Cocoa")
 endif()
+if(OW_PLATFORM STREQUAL "win")
+    set(TRAY_LIBS_STR "Shell32;User32;Gdi32")
+endif()
+endif()
 
 ow_add_module(tray
     SOURCES src/tray_${OW_PLATFORM}.${OW_SRC_EXT}

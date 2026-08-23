@@ -42,9 +42,14 @@ std::vector<std::filesystem::path> SplitPathList(const char* raw) {
     std::vector<std::filesystem::path> out;
     if (!raw || !*raw) return out;
     std::string_view s(raw);
+#if defined(_WIN32)
+    const char sep = ';'; // ':' colisiona con las unidades (C:\…)
+#else
+    const char sep = ':';
+#endif
     size_t start = 0;
     while (start <= s.size()) {
-        auto end = s.find(':', start);
+        auto end = s.find(sep, start);
         if (end == std::string_view::npos) end = s.size();
         if (end > start) out.emplace_back(s.substr(start, end - start));
         start = end + 1;
