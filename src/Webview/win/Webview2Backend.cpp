@@ -74,7 +74,6 @@ std::wstring UserDataDir() {
 // fail-fast (no capturable por try/catch ni por el filtro global). La llamada
 // real vive en EnvCreateInner (puede usar objetos C++); la función SEH solo
 // delega (en su frame no hay nada destructible — requisito /EHsc).
-namespace {
 struct EnvCreateArgs {
     ICoreWebView2EnvironmentOptions* opts;
     const wchar_t* userDataDir;
@@ -82,7 +81,6 @@ struct EnvCreateArgs {
 };
 
 HRESULT EnvCreateInner(EnvCreateArgs* a);
-} // namespace
 
 static HRESULT EnvCreateSeh(EnvCreateArgs* a, unsigned long* sehCode) {
     __try {
