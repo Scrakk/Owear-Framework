@@ -1,3 +1,6 @@
+if(OW_PLATFORM STREQUAL "mac")
+    set(OW_MENU_LIBS "-framework Cocoa")
+endif()
 if(OW_PLATFORM STREQUAL "win")
     set(OW_MENU_LIBS User32)
 endif()
