@@ -43,6 +43,11 @@ function(ow_add_module NAME)
         # library que MSVC genera para el exe del kernel (ENABLE_EXPORTS).
         target_link_libraries(owear-api-${NAME} PRIVATE owear)
     endif()
+    if(APPLE)
+        # Los símbolos del host (ow_shm_*) se resuelven al hacer dlopen:
+        # patrón plugin estándar en Mach-O (equivalente a -rdynamic en Linux).
+        target_link_options(owear-api-${NAME} PRIVATE -Wl,-undefined,dynamic_lookup)
+    endif()
     set_target_properties(owear-api-${NAME} PROPERTIES
         PREFIX "" OUTPUT_NAME "${NAME}")
 endfunction()
