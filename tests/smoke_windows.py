@@ -17,7 +17,8 @@ def connect(timeout=20):
     last_err = None
     while time.time() < deadline:
         try:
-            return open(pipe_path, "r+b", buffering=0)
+            # CON buffer: readline sobre pipe crudo da EINVAL en Windows
+            return open(pipe_path, "r+b")
         except OSError as e:  # la pipe aún no existe
             last_err = e
             time.sleep(0.2)
@@ -29,6 +30,7 @@ def rpc(f, req_id, cmd, params=None):
     line = json.dumps({"id": req_id, "cmd": cmd,
                        "params": params or {}}).encode() + b"\n"
     f.write(line)
+    f.flush()
     raw = f.readline()
     if not raw:
         print("[smoke] pipe cerrada sin respuesta", file=sys.stderr)

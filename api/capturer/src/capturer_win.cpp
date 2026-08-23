@@ -223,7 +223,7 @@ void captureScreen(const ow_request_t* req, ow_response_t* res) {
 
 } // namespace cap
 
-OW_MODULE_EXPORT extern "C" const ow_module_desc_t* ow_module_descriptor(void) {
+extern "C" OW_MODULE_EXPORT const ow_module_desc_t* ow_module_descriptor(void) {
     static const ow_fn_entry_t fns[] = {
         {"getSources", &cap::getSources},
         {"captureScreen", &cap::captureScreen},
