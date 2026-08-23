@@ -127,9 +127,28 @@ private:
         WriteFile(c.handle, out.data(), static_cast<DWORD>(out.size()), &written, nullptr);
     }
 
+    void RecreatePipe() {
+        pipe_ = CreateNamedPipeA(
+            socketPath_.c_str(),
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            4, 64 * 1024, 64 * 1024, 0, nullptr);
+    }
+
     void AcceptOne() {
         if (!ConnectNamedPipe(pipe_, nullptr) &&
             GetLastError() != ERROR_PIPE_CONNECTED) {
+            return;
+        }
+
+        // ImpersonateNamedPipeClient exige que el cliente haya hecho I/O en
+        // la pipe: leemos el primer chunk ANTES de verificar identidad
+        // (gotcha Win32 — verificado en CI).
+        char buf[8192];
+        DWORD n = 0;
+        if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) {
+            DisconnectNamedPipe(pipe_);
+            if (running_) RecreatePipe();
             return;
         }
 
@@ -138,13 +157,7 @@ private:
         if (!ClientIsSameUser(pipe_)) {
             log::Warn("control", "conexión rechazada: usuario del pipe no coincide");
             DisconnectNamedPipe(pipe_);
-            if (running_) {
-                pipe_ = CreateNamedPipeA(
-                    socketPath_.c_str(),
-                    PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                    4, 64 * 1024, 64 * 1024, 0, nullptr);
-            }
+            if (running_) RecreatePipe();
             return;
         }
 
@@ -152,13 +165,9 @@ private:
         clients_[id] = ClientBuf{pipe_, {}};
         activeHandle_ = pipe_;
 
-        // lee hasta desconexión (un cliente por instancia v1)
-        char buf[8192];
-        DWORD n = 0;
-        while (running_) {
-            if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) break;
+        auto processChunk = [&](const char* data, DWORD len) {
             auto& acc = clients_[id].pending;
-            acc.append(buf, n);
+            acc.append(data, len);
             size_t pos;
             while ((pos = acc.find('\n')) != std::string::npos) {
                 std::string line = acc.substr(0, pos);
@@ -169,18 +178,19 @@ private:
                 // lector queda dedicado exclusivamente a I/O del pipe.
                 App::Post([this, id, line] { HandleLine(id, line); });
             }
+        };
+        processChunk(buf, n);
+
+        // lee hasta desconexión (un cliente por instancia v1)
+        while (running_) {
+            if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) break;
+            processChunk(buf, n);
         }
         std::lock_guard lock(sendMu_);
         clients_.erase(id);
         DisconnectNamedPipe(pipe_);
         // recrea instancia para el siguiente cliente
-        if (running_) {
-            pipe_ = CreateNamedPipeA(
-                socketPath_.c_str(),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                4, 64 * 1024, 64 * 1024, 0, nullptr);
-        }
+        if (running_) RecreatePipe();
     }
 
     void ReaderLoop() {
