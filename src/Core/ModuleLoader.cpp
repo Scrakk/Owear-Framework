@@ -29,7 +29,9 @@
 #include <mutex>
 
 // receptor del host para builtins (definido en BuiltinUtil_<plat>)
+#if defined(OW_BUILTINS_GTK)
 extern "C" void ow_builtin_receive_host(const ::ow_module_host_t* h);
+#endif
 
 namespace ow {
 
@@ -200,7 +202,13 @@ size_t ModuleLoader::LoadAll() {
         for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
             if (!e.is_regular_file()) continue;
             auto ext = e.path().extension().string();
+#if defined(_WIN32)
+            if (ext != ".dll" && ext != ".owm") continue;
+#elif defined(__APPLE__)
+            if (ext != ".dylib" && ext != ".so" && ext != ".owm") continue;
+#else
             if (ext != ".so" && ext != ".owm") continue;
+#endif
             total += LoadFile(e.path());
         }
     }
@@ -208,7 +216,9 @@ size_t ModuleLoader::LoadAll() {
 }
 
 void ModuleLoader::ProvideHostToBuiltins() {
+#if defined(OW_BUILTINS_GTK)
     ::ow_builtin_receive_host(static_cast<const ::ow_module_host_t*>(&g_host));
+#endif
 }
 
 void ModuleLoader::Shutdown() {
