@@ -124,7 +124,11 @@ private:
         DWORD written = 0;
         std::string out(line);
         out += '\n';
-        WriteFile(c.handle, out.data(), static_cast<DWORD>(out.size()), &written, nullptr);
+        if (!WriteFile(c.handle, out.data(), static_cast<DWORD>(out.size()),
+                       &written, nullptr)) {
+            log::Error("control", "WriteFile al cliente falló: " +
+                                      std::to_string(GetLastError()));
+        }
     }
 
     void RecreatePipe() {

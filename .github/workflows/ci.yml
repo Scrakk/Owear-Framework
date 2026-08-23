@@ -70,21 +70,20 @@ jobs:
           $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow `
                     -RedirectStandardError "owear-smoke.err.log" `
                     -RedirectStandardOutput "owear-smoke.out.log"
-          python tests/smoke_windows.py $proc.Id
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::group::stderr del kernel"; Get-Content "owear-smoke.err.log"; Write-Host "::endgroup::"
-            Write-Host "::group::stdout del kernel"; Get-Content "owear-smoke.out.log"; Write-Host "::endgroup::"
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Write-Error "smoke E2E falló (código $LASTEXITCODE)"
-            exit 1
+          try {
+            python tests/smoke_windows.py $proc.Id
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            $proc.WaitForExit(20000) | Out-Null
+            if (-not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+              Write-Error "el kernel no salió tras app.quit"
+              exit 1
+            }
+            Write-Host "smoke E2E OK: ventana WebView2 creada y salida limpia (exit $($proc.ExitCode))"
+          } finally {
+            Write-Host "::group::stderr del kernel"; Get-Content "owear-smoke.err.log" -ErrorAction SilentlyContinue; Write-Host "::endgroup::"
+            Write-Host "::group::stdout del kernel"; Get-Content "owear-smoke.out.log" -ErrorAction SilentlyContinue; Write-Host "::endgroup::"
           }
-          $proc.WaitForExit(20000) | Out-Null
-          if (-not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force
-            Write-Error "el kernel no salió tras app.quit"
-            exit 1
-          }
-          Write-Host "smoke E2E OK: ventana WebView2 creada y salida limpia (exit $($proc.ExitCode))"
 
   macos:
     name: macOS · compile + smoke (Cocoa/WebKit frameworks)
