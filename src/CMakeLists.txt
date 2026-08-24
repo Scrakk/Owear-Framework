@@ -157,6 +157,9 @@ if(MSVC)
     # el exe del kernel debe exportar los símbolos (en Linux lo cubre -rdynamic).
     target_link_options(owear PRIVATE
         "/EXPORT:ow_shm_put" "/EXPORT:ow_shm_data" "/EXPORT:ow_shm_shutdown")
+    # Pila de 8 MiB (default 1 MiB desborda en la init de WebView2/Chromium —
+    # misma recomendación /STACK:0x800000 de CEF; mordido con 0xC00000FD).
+    target_link_options(owear PRIVATE "/STACK:0x800000")
 elseif(NOT WIN32)
     target_link_options(owear PRIVATE -rdynamic) # módulos .owm resuelven ow_shm_* del host
 endif()
