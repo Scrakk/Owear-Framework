@@ -74,6 +74,10 @@ std::wstring UserDataDir() {
 // fail-fast (no capturable por try/catch ni por el filtro global). La llamada
 // real vive en EnvCreateInner (puede usar objetos C++); la función SEH solo
 // delega (en su frame no hay nada destructible — requisito /EHsc).
+} // namespace (anónimo)
+
+// file-scope: la definición de EnvCreateInner vive al final del archivo,
+// fuera del namespace anónimo (el LNK2019 vino del desajuste).
 struct EnvCreateArgs {
     ICoreWebView2EnvironmentOptions* opts;
     const wchar_t* userDataDir;
@@ -82,7 +86,7 @@ struct EnvCreateArgs {
 
 HRESULT EnvCreateInner(EnvCreateArgs* a);
 
-static HRESULT EnvCreateSeh(EnvCreateArgs* a, unsigned long* sehCode) {
+HRESULT EnvCreateSeh(EnvCreateArgs* a, unsigned long* sehCode) {
     __try {
         return EnvCreateInner(a);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -90,6 +94,8 @@ static HRESULT EnvCreateSeh(EnvCreateArgs* a, unsigned long* sehCode) {
         return E_FAIL;
     }
 }
+
+namespace {
 
 class Webview2Backend final : public IWebviewBackend {
 public:
