@@ -61,6 +61,26 @@ LONG WINAPI OwUnhandledFilter(EXCEPTION_POINTERS* info) {
                               info->ExceptionRecord->ExceptionCode)));
     return EXCEPTION_EXECUTE_HANDLER;
 }
+
+// Primera oportunidad: registra TODAS las excepciones, incluidos los
+// fail-fast que no llegan al filtro global ni al __except.
+LONG CALLBACK OwVectoredHandler(PEXCEPTION_POINTERS info) {
+    const ULONG_PTR code =
+        info && info->ExceptionRecord
+            ? info->ExceptionRecord->ExceptionCode
+            : 0;
+    // filtra ruido benigno de C++/guard pages
+    if (code != 0xE06D7363 /*C++ throw*/ &&
+        code != 0x80000001 /*guard page*/) {
+        log::Error("app", "excepción (1a oportunidad): 0x" +
+                              std::to_string(static_cast<unsigned long>(code)) +
+                              " en addr=0x" + std::to_string(
+                                  reinterpret_cast<uintptr_t>(
+                                      info->ExceptionRecord
+                                          ->ExceptionAddress)));
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 } // namespace
 
 bool PlatformInit(int argc, char** argv) {
@@ -68,6 +88,7 @@ bool PlatformInit(int argc, char** argv) {
     (void)argv;
     g_mainThreadId = GetCurrentThreadId();
     SetUnhandledExceptionFilter(&OwUnhandledFilter);
+    AddVectoredExceptionHandler(1, &OwVectoredHandler);
 
     // COM apartment single-threaded para WebView2
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
