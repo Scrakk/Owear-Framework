@@ -34,7 +34,7 @@ static inline uint32_t WinId(const Value& args) {
 }
 
 #define NEED_WIN(id)                        \
-    GtkWindow* gtkWin = ow::builtin::WindowById(id); \
+    GtkWindow* gtkWin = static_cast<GtkWindow*>(ow::builtin::WindowById(id)); \
     WebKitWebView* view = static_cast<WebKitWebView*>(ow::builtin::WebviewById(id)); \
     if (!gtkWin || !view) return RespondError(res, "ventana no encontrada");
 
@@ -88,7 +88,7 @@ void capturePage(const ow_request_t* req, ow_response_t* res) {
     webkit_web_view_get_snapshot(view, WEBKIT_SNAPSHOT_REGION_VISIBLE,
                                  WEBKIT_SNAPSHOT_OPTIONS_NONE, nullptr,
                                  OnSnapshot, &ctx);
-    ow::builtin::PumpUntil(ctx.done);
+    while (!ctx.done) gtk_main_iteration();
 
     if (!ctx.surface)
         return RespondError(res, "snapshot falló: " + ctx.error);

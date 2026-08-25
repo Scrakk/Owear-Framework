@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // src/Core/BuiltinUtil.hpp — helpers para módulos builtin acoplados al kernel.
+// Neutro de plataforma: los widgets nativos viajan como void*; cada
+// BuiltinUtil_<plat> define su resolución concreta.
 //
 #pragma once
 
 #include "Log.hpp"
 #include "ow_api.h"
 
-#include <gtk/gtk.h>
 #include <map>
 #include <string>
 
@@ -18,20 +19,14 @@ namespace ow::builtin {
 const ow_module_host_t* Host();
 void SetHost(const ow_module_host_t* h);
 
-/// Convierte windowId → GtkWindow* (toplevel del webview). nullptr si inválida.
-GtkWindow* WindowById(uint32_t id);
+/// Convierte windowId → handle de la ventana top-level (HWND en Windows,
+/// GtkWindow* en Linux, NSView/NSWindow en macOS). nullptr si inválida.
+/// En Linux devuelve GtkWindow*; el tipo fuerte vive en BuiltinUtil_linux.
+void* WindowById(uint32_t id);
 
-/// Convierte windowId → WebKitWebView*. nullptr si inválida.
+/// Convierte windowId → widget del webview (WebKitWebView*/ICoreWebView2
+/// host HWND/WKWebView*). nullptr si inválida.
 void* WebviewById(uint32_t id);
-
-/// Nested loop: bloquea en gtk_main_iteration hasta que `done` sea true.
-/// Para puentes síncronos sobre APIs async de WebKit (mismo patrón que los
-/// diálogos modales). NO llamar desde otro hilo.
-inline void PumpUntil(const volatile bool& done) {
-    while (!done) {
-        gtk_main_iteration();
-    }
-}
 
 /// Emite evento (con marshaling ya hecho por el host).
 inline void Emit(uint32_t windowId, const char* name, const std::string& json) {

@@ -76,6 +76,9 @@ jobs:
           try {
             python tests/smoke_windows.py $proc.Id
             if ($LASTEXITCODE -ne 0) { exit 1 }
+            # suite E2E completa (mismas páginas que Linux): all + builtins
+            python tests/e2e/run_suites.py --pages all.html builtins.html --port 8123
+            if ($LASTEXITCODE -ne 0) { exit 1 }
             $proc.WaitForExit(20000) | Out-Null
             if (-not $proc.HasExited) {
               Stop-Process -Id $proc.Id -Force
@@ -118,6 +121,25 @@ jobs:
           fi
           kill $KPID
           echo "smoke OK: kernel vivo tras 8s"
+      - name: E2E suite completa (all + builtins vía WKWebView)
+        run: |
+          MODS=""
+          for d in build/macos-release/api/*/; do MODS="$MODS$d:"; done
+          MODS=${MODS%:}
+          OW_APP_NAME=CI OW_MODULES_DIR="$MODS" \
+            ./build/macos-release/src/owear > /tmp/owear-e2e.log 2>&1 &
+          KPID=$!
+          sleep 8
+          if ! kill -0 $KPID 2>/dev/null; then
+            echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::"
+            echo "el kernel murió en el arranque"; exit 1
+          fi
+          timeout 150 python3 tests/e2e/run_suites.py \
+            --pages all.html builtins.html --port 8123 || \
+          { echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::";
+            kill $KPID 2>/dev/null; exit 1; }
+          kill $KPID 2>/dev/null
+          echo "E2E macOS OK"
       # Los .mm de Cocoa/WebKit se compilan aquí: errores reales visibles.
 
   packages:

@@ -87,6 +87,9 @@ elseif(OW_PLATFORM STREQUAL "win")
     )
     if(OW_WITH_WEBVIEW2)
         list(APPEND OW_KERNEL_SOURCES Webview/win/Webview2Backend.cpp)
+        # builtin window-extras nativo (Webview2: devtools/capture/zoom/...)
+        list(APPEND OW_KERNEL_SOURCES
+            ${CMAKE_SOURCE_DIR}/api/window/src/window_extra_win.cpp)
     else()
         # Stub sin WebView2 SDK: CreateWebviewBackend() → nullptr con log claro.
         list(APPEND OW_KERNEL_SOURCES Webview/win/Webview2Stub_win.cpp)
@@ -98,6 +101,8 @@ elseif(OW_PLATFORM STREQUAL "mac")
         Webview/mac/WKWebviewBackend.mm
         Control/ControlServer_mac.mm
         Runtime/NodeManager_mac.mm
+        # builtin window-extras nativo (WKWebView: capture/zoom/opacity/...)
+        ${CMAKE_SOURCE_DIR}/api/window/src/window_extra_mac.mm
     )
 endif()
 
@@ -111,6 +116,9 @@ target_include_directories(owear_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 target_compile_definitions(owear_core PUBLIC OW_VERSION_STRING="0.1.0")
+if(OW_PLATFORM STREQUAL "win")
+    target_compile_definitions(owear_core PUBLIC OW_PLATFORM_WIN=1)
+endif()
 
 target_link_libraries(owear_core PUBLIC Threads::Threads ZLIB::ZLIB)
 

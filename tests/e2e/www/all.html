@@ -1,46 +1,86 @@
 <!doctype html><body style='font-family:monospace;background:#111;color:#eee'><div id=r>…</div><script>
+(async () => {
 window.__R = {}; // resultados
 const t = async (name, fn) => {
   try { window.__R[name] = JSON.stringify(await fn()); }
   catch (e) { window.__R[name] = 'ERR: ' + e.message; }
 };
-(async () => {
-  await t('path.join', async () => ow.invoke('path','join','/usr','local','bin'));
-  await t('path.homeDir', async () => ow.invoke('path','homeDir'));
-  await t('fs.copy+rename', async () => {
-    await ow.invoke('fs','writeFile','/tmp/ow-a.txt','hola');
-    await ow.invoke('fs','copy','/tmp/ow-a.txt','/tmp/ow-b.txt');
-    await ow.invoke('fs','rename','/tmp/ow-b.txt','/tmp/ow-c.txt');
-    return await ow.invoke('fs','readText','/tmp/ow-c.txt');
+const IS_WIN = navigator.userAgent.includes('Windows');
+const IS_MAC = navigator.userAgent.includes('Mac OS') && !navigator.userAgent.includes('iPhone');
+let TMP = '/tmp';
+try { TMP = await ow.invoke('fs','mkdtemp','owe2e-') || TMP; } catch (e) {}
+const j = (...a) => ow.invoke('path','join',...a);
+const tmpf = async (n) => j(TMP, n);
+await t('__setup.tmp', async () => TMP);
+
+  await t('path.join', async () => ow.invoke('path','join','a','b','c'));
+  await t('path.homeDir', async () => {
+    const h = await ow.invoke('path','homeDir');
+    if (!h || h.length < 2) throw new Error('home vacío');
+    return 'home ok';
   });
-  await t('fs.realpath', async () => ow.invoke('fs','realpath','/etc/hosts'));
-  await t('fs.mkdtemp', async () => ow.invoke('fs','mkdtemp','owtest-'));
-  await t('fs.access', async () => ow.invoke('fs','access','/etc/hosts',4));
-  await t('fs.lstat', async () => ow.invoke('fs','lstat','/etc/hosts'));
+  await t('fs.copy+rename', async () => {
+    const a = await tmpf('ow-a.txt'), b = await tmpf('ow-b.txt'), c = await tmpf('ow-c.txt');
+    await ow.invoke('fs','writeFile',a,'hola');
+    await ow.invoke('fs','copy',a,b);
+    await ow.invoke('fs','rename',b,c);
+    return await ow.invoke('fs','readText',c);
+  });
+  await t('fs.realpath', async () => {
+    const f = await tmpf('ow-real.txt');
+    await ow.invoke('fs','writeFile',f,'x');
+    const rp = await ow.invoke('fs','realpath',f);
+    if (!rp || rp.length < 3) throw new Error('realpath vacío');
+    return 'real ok';
+  });
+  await t('fs.mkdtemp', async () => {
+    const d = await ow.invoke('fs','mkdtemp','owtest-');
+    if (!d) throw new Error('mkdtemp vacío');
+    return 'dir ok';
+  });
+  await t('fs.access', async () => {
+    const f = await tmpf('ow-access.txt');
+    await ow.invoke('fs','writeFile',f,'x');
+    await ow.invoke('fs','access',f,4);
+    return 'accesible';
+  });
+  await t('fs.lstat', async () => {
+    const f = await tmpf('ow-lstat.txt');
+    await ow.invoke('fs','writeFile',f,'hola');
+    const st = await ow.invoke('fs','lstat',f);
+    return 'size=' + (st.size !== undefined ? st.size : JSON.stringify(st).slice(0,40));
+  });
   await t('fs.handles', async () => {
-    const fd = await ow.invoke('fs','open','/tmp/ow-handle.txt','w');
+    const f = await tmpf('ow-handle.txt');
+    const fd = await ow.invoke('fs','open',f,'w');
     const n = await ow.invoke('fs','write',fd,'contenido-handle');
     await ow.invoke('fs','close',fd);
-    const fd2 = await ow.invoke('fs','open','/tmp/ow-handle.txt','r');
+    const fd2 = await ow.invoke('fs','open',f,'r');
     const r = await ow.invoke('fs','read',fd2,0,1024);
     await ow.invoke('fs','close',fd2);
     const txt = r.b64 ? atob(r.b64) : '(shm)';
     return n + ':' + txt;
   });
   await t('fs.watch', async () => new Promise((res) => {
-    ow.invoke('fs','watch','/tmp/owtest',false).then(async (wid) => {
-      window.__watchId = wid;
-      ow.on('fs.watch', (p) => {
-        if (p.watcherId === wid && p.events.some(e => e.path.includes('watch-me.txt')))
-          res('evento recibido ✓');
-      });
-      await new Promise(r => setTimeout(r, 300));
-      await ow.invoke('fs','writeFile','/tmp/owtest/watch-me.txt','x');
-      setTimeout(() => res('timeout sin evento'), 3000);
-    });
+    (async () => {
+      const dir = await tmpf('owtest');
+      try { await ow.invoke('fs','mkdir',dir); } catch (e) {}
+      ow.invoke('fs','watch',dir,false).then(async (wid) => {
+        window.__watchId = wid;
+        ow.on('fs.watch', (p) => {
+          if (p.watcherId === wid && p.events.some(e => e.path.includes('watch-me.txt')))
+            res('evento recibido ✓');
+        });
+        await new Promise(r => setTimeout(r, 300));
+        await ow.invoke('fs','writeFile',await j(dir,'watch-me.txt'),'x');
+        setTimeout(() => res('timeout sin evento'), 3000);
+      }).catch(e => res('ERR ' + e.message));
+    })();
   }));
   await t('process.spawn', async () => new Promise((res) => {
-    ow.invoke('process','spawn','echo',['HELLO_PROC']).then((r) => {
+    const cmd = IS_WIN ? 'cmd' : 'echo';
+    const args = IS_WIN ? ['/c','echo','HELLO_PROC'] : ['HELLO_PROC'];
+    ow.invoke('process','spawn',cmd,args).then((r) => {
       const pid = r.procId;
       let got = '';
       ow.on('process.stdout', (p) => {
@@ -52,19 +92,24 @@ const t = async (name, fn) => {
       });
     }).catch(e => res('ERR ' + e.message));
   }));
-  await t('process.pty', async () => new Promise((res) => {
-    ow.invoke('process','ptyOpen','/bin/bash',[],null,80,24).then((r) => {
-      const pid = r.procId;
-      let got = '';
-      const un1 = ow.on('process.stdout', (p) => {
-        if (p.procId !== pid) return;
-        got += atob(p.b64);
-        if (got.includes('PTY_FUNCIONA')) { un1(); res('pty-echo ✓'); }
-      });
-      setTimeout(() => ow.invoke('process','write',pid,'echo PTY_FUNCIONA\n'), 400);
-      setTimeout(() => { un1(); ow.invoke('process','kill',pid).catch(()=>{}); res('timeout pty: ' + got.slice(-60)); }, 4000);
-    }).catch(e => res('ERR ' + e.message));
-  }));
+  if (!IS_WIN) {
+    await t('process.pty', async () => new Promise((res) => {
+      const sh = IS_MAC ? '/bin/zsh' : '/bin/bash';
+      ow.invoke('process','ptyOpen',sh,[],null,80,24).then((r) => {
+        const pid = r.procId;
+        let got = '';
+        const un1 = ow.on('process.stdout', (p) => {
+          if (p.procId !== pid) return;
+          got += atob(p.b64);
+          if (got.includes('PTY_FUNCIONA')) { un1(); res('pty-echo ✓'); }
+        });
+        setTimeout(() => ow.invoke('process','write',pid,'echo PTY_FUNCIONA\n'), 400);
+        setTimeout(() => { un1(); ow.invoke('process','kill',pid).catch(()=>{}); res('timeout pty: ' + got.slice(-60)); }, 4000);
+      }).catch(e => res('ERR ' + e.message));
+    }));
+  } else {
+    window.__R['process.pty'] = 'SKIP (solo POSIX)';
+  }
   await t('screen.displays', async () => {
     const d = await ow.invoke('screen','getAllDisplays');
     const prim = d.find(x=>x.primary) || d[0]; return d.length + ' display(s), primary=' + prim.bounds.width + 'px';
@@ -74,7 +119,8 @@ const t = async (name, fn) => {
     return await ow.invoke('clipboard','readText');
   });
   await t('net.download', async () => {
-    const r = await ow.invoke('net','download','http://localhost:8123/fake-update.bin','/tmp/ow-dl.bin');
+    const dst = await tmpf('ow-dl.bin');
+    const r = await ow.invoke('net','download','http://localhost:8123/fake-update.bin',dst);
     return 'sha256=' + r.sha256.slice(0,12) + '…';
   });
   await t('notification', async () => ow.invoke('notification','show','Owear E2E','Si ves esto, las notificaciones del sistema funcionan'));
