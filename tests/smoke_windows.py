@@ -109,6 +109,6 @@ print(f"[smoke] ventana creada id={wid}")
 time.sleep(4)  # environment+controller+navigation reales de WebView2
 
 r = rpc(h, 2, "app.quit")
-print(f"[smoke] app.quit → {r}")
+print(f"[smoke] app.quit ok={r.get('ok')}")
 sys.exit(0)
 
