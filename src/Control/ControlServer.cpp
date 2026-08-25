@@ -161,8 +161,12 @@ bool ControlServer::HandleCommand(uint64_t clientId, uint64_t id,
     }
 
     if (cmd == "app.quit") {
-        App::Quit(0);
+        // Responde PRIMERO y pide el quit DESPUÉS (con margen): si Quit
+        // postea WM_QUIT inmediatamente, el main loop sale y Stop cierra
+        // la pipe antes de que la respuesta llegue al cliente (mordido).
         resultJson = "null";
+        App::Post([] { App::Quit(0); });
+        internal::PlatformDelay(150, [] { App::Quit(0); });
         return true;
     }
 
