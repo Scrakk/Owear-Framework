@@ -54,6 +54,7 @@ void Emit(Window::Impl* impl, const std::string& name, std::string_view payload 
 } // namespace
 
 bool Window::Impl::PCreate() {
+    log::Info("window", "PCreate(mac): inicio");
     pdata = new PlatformData();
 
     NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
@@ -115,7 +116,11 @@ bool Window::Impl::PCreate() {
         }
     }];
 
-    if (!webview->Create(win, opts.webviewArgs)) return false;
+    if (!webview->Create(win, opts.webviewArgs)) {
+        log::Error("window", "PCreate(mac): webview->Create falló");
+        return false;
+    }
+    log::Info("window", "PCreate(mac): webview creado");
 
     const char* assetsDir = std::getenv("OW_ASSETS_DIR");
     if (assetsDir && *assetsDir)
@@ -124,6 +129,7 @@ bool Window::Impl::PCreate() {
         webview->RegisterAssetScheme("app", std::filesystem::current_path() / "dist");
 
     if (opts.show) PShow();
+    log::Info("window", "PCreate(mac): ok");
     return true;
 }
 
