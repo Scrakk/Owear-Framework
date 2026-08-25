@@ -25,7 +25,9 @@ jobs:
         run: |
           sudo apt-get install -y dbus dunst || true
           export $(dbus-launch)   # session bus para notification/power
-          dunst >/dev/null 2>&1 &
+          # dunst crashea puntual en runners (Trace/breakpoint trap); si
+          # muere tras el arranque el E2E sigue — solo notifications lo usa.
+          (dunst >/dev/null 2>&1 &) || true
           MODS=""
           for d in build/linux-release/api/*/; do MODS="$MODS$d:"; done
           MODS=${MODS%:}
