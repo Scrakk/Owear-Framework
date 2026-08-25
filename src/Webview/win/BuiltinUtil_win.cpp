@@ -24,7 +24,7 @@ void SetHost(const ow_module_host_t* h) {
     g_host = *h;
 }
 
-HWND WindowById(uint32_t id) {
+void* WindowById(uint32_t id) {
     auto it = LiveWindows().find(id);
     if (it == LiveWindows().end()) return nullptr;
     void* w = it->second->NativeHandle();

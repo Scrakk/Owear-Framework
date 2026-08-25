@@ -43,21 +43,37 @@ def _find_unix(wait_s: float) -> "LineConn":
                        key=os.path.getmtime)
         if socks:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.settimeout(15)
             s.connect(socks[-1])
-            f = s.makefile("rwb")
+            s.setblocking(True)
+            acc = bytearray()
 
             class Uds(LineConn):
                 def write_line(self, data):
-                    f.write(data + b"\n")
-                    f.flush()
+                    s.sendall(data + b"\n")
 
                 def read_line(self, timeout_s=15.0):
-                    s.settimeout(timeout_s)
-                    try:
-                        return f.readline().rstrip(b"\n")
-                    except socket.timeout:
-                        return b""
+                    # recv con timeout por operación: sin makefile (un timeout
+                    # envenena el buffer del file object y el siguiente
+                    # readline lanza OSError — mordido en CI).
+                    nonlocal acc
+                    deadline = time.time() + timeout_s
+                    while b"\n" not in acc:
+                        if time.time() > deadline:
+                            return b""
+                        s.settimeout(max(0.1, deadline - time.time()))
+                        try:
+                            chunk = s.recv(8192)
+                        except socket.timeout:
+                            return b""
+                        except OSError:
+                            return b""
+                        if not chunk:
+                            return b""
+                        acc += chunk
+                    i = acc.index(b"\n")
+                    line = bytes(acc[:i])
+                    del acc[:i + 1]
+                    return line
 
                 def close(self):
                     try:

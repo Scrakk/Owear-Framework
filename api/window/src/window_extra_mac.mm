@@ -67,7 +67,9 @@ void capturePage(const ow_request_t* req, ow_response_t* res) {
                       completionHandler:^(NSImage* img, NSError* err) {
         if (err) { errText = err.localizedDescription; }
         else if (img) {
-            CGImageRef cg = img.CGImage;
+            CGImageRef cg = [img CGImageForProposedRect:nullptr
+                                                context:nil
+                                                  hints:nil];
             NSBitmapImageRep* rep =
                 [[NSBitmapImageRep alloc] initWithCGImage:cg];
             png = [rep representationUsingType:NSBitmapImageFileTypePNG
