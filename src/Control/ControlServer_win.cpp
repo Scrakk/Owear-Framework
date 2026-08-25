@@ -81,7 +81,7 @@ public:
         // handle síncrono; con overlapped+nullptr el comportamiento es indefinido).
         pipe_ = CreateNamedPipeA(
             name,
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             4,   // instancias
             64 * 1024, 64 * 1024, 0, nullptr);
@@ -158,11 +158,18 @@ private:
     }
 
     void RecreatePipe() {
+        // SIN FILE_FLAG_FIRST_PIPE_INSTANCE: ese flag exige ser la primera
+        // instancia del nombre y las recreaciones tras desconexión siempre
+        // fallarían (mordido: solo el primer cliente podía conectar).
         pipe_ = CreateNamedPipeA(
             socketPath_.c_str(),
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             4, 64 * 1024, 64 * 1024, 0, nullptr);
+        if (pipe_ == INVALID_HANDLE_VALUE) {
+            log::Error("control", "RecreatePipe falló: " +
+                                      std::to_string(GetLastError()));
+        }
     }
 
     void AcceptOne() {
