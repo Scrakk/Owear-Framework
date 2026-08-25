@@ -82,7 +82,7 @@ jobs:
             python tests/smoke_windows.py $proc.Id
             if ($LASTEXITCODE -ne 0) { exit 1 }
             # suite E2E completa (mismas páginas que Linux): all + builtins
-            python tests/e2e/run_suites.py --pages all.html builtins.html --port 8123
+            python tests/e2e/run_suites.py --pid $proc.Id --pages all.html builtins.html --port 8123
             if ($LASTEXITCODE -ne 0) { exit 1 }
             # salida limpia: app.quit por la pipe y WaitForExit
             python tests/quit_windows.py $proc.Id

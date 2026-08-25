@@ -24,15 +24,16 @@ class LineConn:
         pass
 
 
-def find_kernel_conn(wait_s: float = 30.0) -> "LineConn":
-    """Descubre el control socket del kernel y conecta."""
+def find_kernel_conn(wait_s: float = 30.0, pid: int = 0) -> "LineConn":
+    """Descubre el control socket del kernel y conecta. Si `pid` se da,
+    prueba esa pipe/sock primero (el CI conoce el PID del kernel)."""
     if os.name == "nt":
-        return _find_win(wait_s)
-    return _find_unix(wait_s)
+        return _find_win(wait_s, pid)
+    return _find_unix(wait_s, pid)
 
 
 # ── POSIX: UDS en $XDG_RUNTIME_DIR/owear-<pid>.sock ──────────────────────────
-def _find_unix(wait_s: float) -> "LineConn":
+def _find_unix(wait_s: float, pid: int = 0) -> "LineConn":
     import glob
     import socket
 
@@ -41,10 +42,16 @@ def _find_unix(wait_s: float) -> "LineConn":
     deadline = time.time() + wait_s
     while time.time() < deadline:
         socks = []
+        if pid:
+            for d in sock_dirs:
+                if d and os.path.isdir(d):
+                    p = os.path.join(d, f"owear-{pid}.sock")
+                    if os.path.exists(p):
+                        socks.append(p)
         for d in sock_dirs:
             if d and os.path.isdir(d):
                 socks += glob.glob(os.path.join(d, "owear-*.sock"))
-        socks = sorted(socks, key=os.path.getmtime)
+        socks = sorted(set(socks), key=os.path.getmtime)
         if socks:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(socks[-1])
@@ -94,7 +101,7 @@ def _find_unix(wait_s: float) -> "LineConn":
 # ── Windows: named pipe \\.\pipe\owear-<pid> vía WinAPI directa ─────────────
 # La capa CRT open()/readline da EINVAL sobre pipes aquí (mordido): todo va
 # por CreateFileW/PeekNamedPipe/ReadFile/WriteFile con ctypes.
-def _find_win(wait_s: float) -> "LineConn":
+def _find_win(wait_s: float, pid: int = 0) -> "LineConn":
     import ctypes
 
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -103,8 +110,6 @@ def _find_win(wait_s: float) -> "LineConn":
                                 ctypes.c_uint32, ctypes.c_void_p,
                                 ctypes.c_uint32, ctypes.c_uint32,
                                 ctypes.c_void_p]
-    for fn in ("ReadFile", "WriteFile"):
-        setattr(k32, fn + ".argtypes", None)
     k32.ReadFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
                              ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
     k32.WriteFile.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32,
@@ -118,18 +123,21 @@ def _find_win(wait_s: float) -> "LineConn":
     OPEN_EXISTING = 3
     INVALID = (1 << (8 * ctypes.sizeof(ctypes.c_void_p))) - 1
 
-    # descubre el pid del kernel entre los pipes owear-* existentes probando
-    pids = _win_kernel_pids()
+    def try_path(path):
+        hh = k32.CreateFileW(path, GENERIC_RW, 0, None, OPEN_EXISTING, 0, None)
+        if hh not in (0, INVALID):
+            return hh
+        return None
+
+    pids_fn = _win_kernel_pids()
     deadline = time.time() + wait_s
     h = None
     while time.time() < deadline and h is None:
-        candidates = pids() if callable(pids) else pids
-        for pid in candidates:
-            path = rf"\\.\pipe\owear-{pid}"
-            hh = k32.CreateFileW(path, GENERIC_RW, 0, None, OPEN_EXISTING,
-                                 0, None)
-            if hh not in (0, INVALID):
-                h = hh
+        # 1) PID conocido (el CI lo pasa), 2) snapshot de procesos
+        candidates = ([pid] if pid else []) + (pids_fn() or [])
+        for p in candidates:
+            h = try_path(rf"\\.\pipe\owear-{p}")
+            if h:
                 break
         if h is None:
             time.sleep(0.3)

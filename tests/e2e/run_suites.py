@@ -95,9 +95,11 @@ def main():
     ap.add_argument("--pages", nargs="+",
                     default=["all.html", "builtins.html"])
     ap.add_argument("--port", type=int, default=8123)
+    ap.add_argument("--pid", type=int, default=0,
+                    help="PID del kernel (Windows: pipe directa)")
     args = ap.parse_args()
 
-    conn = owconn.find_kernel_conn()
+    conn = owconn.find_kernel_conn(pid=args.pid)
 
     serve(args.port)
     total_ok = total_fail = 0
