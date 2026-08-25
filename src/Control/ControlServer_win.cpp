@@ -118,6 +118,20 @@ public:
         if (pipe_ != INVALID_HANDLE_VALUE)
             CancelIoEx(pipe_, nullptr);
         if (readerThread_.joinable()) readerThread_.join();
+        // respuestas encoladas sin entregar (p.ej. la de app.quit: el lector
+        // dejó de drenar cuando running_ pasó a false). El handle ya es
+        // exclusivo de este hilo — escritura directa segura.
+        std::vector<std::pair<uint64_t, std::string>> pend;
+        {
+            std::lock_guard lock(outboxMu_);
+            pend.swap(outbox_);
+        }
+        for (auto& [id, payload] : pend) {
+            if (pipe_ == INVALID_HANDLE_VALUE) break;
+            ClientBuf tmp{pipe_, {}};
+            WriteClient(tmp, payload);
+        }
+        if (pipe_ != INVALID_HANDLE_VALUE) FlushFileBuffers(pipe_);
         if (pipe_ != INVALID_HANDLE_VALUE) {
             DisconnectNamedPipe(pipe_);
             CloseHandle(pipe_);
