@@ -111,14 +111,18 @@ public:
     }
 
     void PlatformStop() override {
+        // orden crítico: primero despierta al lector (CancelIoEx), luego
+        // espera a que SALGA de AcceptOne (ningún uso del handle en vuelo),
+        // y SOLO entonces destruye el handle.
         running_ = false;
-        if (pipe_ != INVALID_HANDLE_VALUE) {
+        if (pipe_ != INVALID_HANDLE_VALUE)
             CancelIoEx(pipe_, nullptr);
+        if (readerThread_.joinable()) readerThread_.join();
+        if (pipe_ != INVALID_HANDLE_VALUE) {
             DisconnectNamedPipe(pipe_);
             CloseHandle(pipe_);
             pipe_ = INVALID_HANDLE_VALUE;
         }
-        if (readerThread_.joinable()) readerThread_.join();
     }
 
 private:
@@ -150,6 +154,13 @@ private:
     void AcceptOne() {
         if (!ConnectNamedPipe(pipe_, nullptr) &&
             GetLastError() != ERROR_PIPE_CONNECTED) {
+            // CancelIoEx (PlatformSend/Stop) aborta también la espera de
+            // conexión: drena el outbox pendiente y reintenta si seguimos
+            // vivos (sin esto, la respuesta de app.quit se pierde).
+            if (running_) {
+                DrainOutbox();
+                if (pipe_ != INVALID_HANDLE_VALUE) return; // ReaderLoop reitera
+            }
             return;
         }
 
