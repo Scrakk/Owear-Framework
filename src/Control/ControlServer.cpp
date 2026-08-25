@@ -161,8 +161,13 @@ bool ControlServer::HandleCommand(uint64_t clientId, uint64_t id,
     }
 
     if (cmd == "app.quit") {
-        App::Quit(0);
+        // Responde PRIMERO y pide el quit DESPUÉS (con margen): si Quit
+        // postea WM_QUIT inmediatamente, el main loop sale y Stop cierra
+        // la pipe antes de que la respuesta llegue al cliente (mordido).
+        // Sin Post inmediato: solo el delay — la respuesta sale por el
+        // outbox durante la ventana de gracia.
         resultJson = "null";
+        internal::PlatformDelay(300, [] { App::Quit(0); });
         return true;
     }
 
@@ -321,6 +326,9 @@ void ControlServer::HandleLine(uint64_t clientId, std::string_view line) {
     if (const V* v = msg.Find("params"); v) paramsJson = v->Serialize();
 
     if (cmd.empty()) return;
+
+    // traza de diagnóstico: qué comando entra y desde qué hilo muere el flujo
+    log::Info("control", "cmd: " + cmd);
 
     // Eventos JS→nativo vía SDK (sin id)
     if (cmd == "event.emit") {

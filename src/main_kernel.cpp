@@ -14,6 +14,10 @@
 #include <cstdlib>
 
 int main(int argc, char** argv) {
+    // stderr sin buffer: redirigido a fichero en CI, el CRT de MSVC puede
+    // bufferizarlo y perder todo si el proceso muere o se cuelga.
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+
     ow::AppOptions opts;
     if (const char* id = std::getenv("OW_APP_ID")) opts.id = id;
     if (const char* name = std::getenv("OW_APP_NAME")) opts.name = name;

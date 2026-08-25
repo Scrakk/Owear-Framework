@@ -4,6 +4,7 @@
 // src/Core/App_win.cpp — main loop Win32.
 //
 #include "App.hpp"
+#include "Log.hpp"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -21,30 +22,10 @@ namespace ow::internal {
 namespace {
 constexpr UINT kWmOwPump = WM_APP + 0x4F51; // mensaje interno de drenaje
 DWORD g_mainThreadId = 0;
+HWND g_pumpHwnd = nullptr;
 
 std::mutex g_pendingMu;
 std::queue<std::function<void()>> g_pending;
-} // namespace
-
-bool PlatformInit(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-    g_mainThreadId = GetCurrentThreadId();
-
-    // COM apartment single-threaded para WebView2
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    return SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
-}
-
-void PlatformPost(std::function<void()> fn) {
-    bool wake = false;
-    {
-        std::lock_guard lock(g_pendingMu);
-        wake = g_pending.empty(); // solo despierta si la cola estaba vacía
-        g_pending.push(std::move(fn));
-    }
-    if (wake) PostThreadMessageW(g_mainThreadId, kWmOwPump, 0, 0);
-}
 
 static void DrainPending() {
     std::queue<std::function<void()>> batch;
@@ -60,6 +41,120 @@ static void DrainPending() {
         } catch (...) {
             // nunca matar el loop por un callback
         }
+    }
+}
+
+LRESULT CALLBACK PumpWndProc(HWND h, UINT m, WPARAM, LPARAM) {
+    if (m == kWmOwPump) {
+        DrainPending();
+        return 0;
+    }
+    return DefWindowProcW(h, m, 0, 0);
+}
+
+// Diagnóstico: los crashes silenciosos (p.ej. en la creación de WebView2)
+// matan el proceso sin una sola línea de log. Esto registra al menos el
+// código de excepción y el módulo donde ocurrió.
+LONG WINAPI OwUnhandledFilter(EXCEPTION_POINTERS* info) {
+    log::Error("app", "excepción no manejada: código 0x" +
+                          std::to_string(static_cast<unsigned long>(
+                              info->ExceptionRecord->ExceptionCode)));
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// Primera oportunidad: registra TODAS las excepciones, incluidos los
+// fail-fast que no llegan al filtro global ni al __except.
+LONG CALLBACK OwVectoredHandler(PEXCEPTION_POINTERS info) {
+    const ULONG_PTR code =
+        info && info->ExceptionRecord
+            ? info->ExceptionRecord->ExceptionCode
+            : 0;
+    // filtra ruido benigno de C++/guard pages
+    if (code != 0xE06D7363 /*C++ throw*/ &&
+        code != 0x80000001 /*guard page*/) {
+        log::Error("app", "excepción (1a oportunidad): 0x" +
+                              std::to_string(static_cast<unsigned long>(code)) +
+                              " en addr=0x" + std::to_string(
+                                  reinterpret_cast<uintptr_t>(
+                                      info->ExceptionRecord
+                                          ->ExceptionAddress)));
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+} // namespace
+
+bool PlatformInit(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+    g_mainThreadId = GetCurrentThreadId();
+    SetUnhandledExceptionFilter(&OwUnhandledFilter);
+    AddVectoredExceptionHandler(1, &OwVectoredHandler);
+
+    // COM apartment single-threaded para WebView2
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool comOk = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+    if (!comOk)
+        log::Error("app", "CoInitializeEx falló: " + std::to_string(hr));
+
+    // Fuerza la creación de la cola de mensajes del hilo principal AHORA:
+    // PostThreadMessageW desde el hilo lector pierde el mensaje (devuelve
+    // FALSE sin error visible en nuestro log) si la cola aún no existe.
+    MSG probe;
+    PeekMessageW(&probe, nullptr, 0, 0, PM_NOREMOVE);
+
+    // ventana fantasma en el hilo principal: canal de despacho confiable.
+    // Si falla, PlatformPost cae al canal viejo (PostThreadMessage).
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = &PumpWndProc;
+    wc.lpszClassName = L"owear-pump";
+    wc.hInstance = GetModuleHandleW(nullptr);
+    ATOM atom = RegisterClassW(&wc);
+    if (!atom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        log::Error("app", "RegisterClassW(pump) falló: " +
+                              std::to_string(GetLastError()));
+    } else {
+        g_pumpHwnd = CreateWindowExW(0, wc.lpszClassName, nullptr, 0, 0, 0, 0,
+                                     0, HWND_MESSAGE, nullptr, wc.hInstance,
+                                     nullptr);
+        if (!g_pumpHwnd) {
+            DWORD err = GetLastError();
+            log::Warn("app", "ventana pump HWND_MESSAGE no disponible (" +
+                                 std::to_string(err) + ") — reintento normal");
+            // reintento como ventana oculta común (algunos entornos de
+            // sesión no interactiva rechazan message-only windows)
+            g_pumpHwnd = CreateWindowExW(
+                0, wc.lpszClassName, L"", WS_OVERLAPPED, 0, 0, 0, 0, nullptr,
+                nullptr, wc.hInstance, nullptr);
+            if (!g_pumpHwnd) {
+                log::Warn("app", "ventana pump no disponible (" +
+                                     std::to_string(GetLastError()) +
+                                     ") — despacho vía PostThreadMessage");
+            }
+        }
+    }
+    if (g_pumpHwnd) log::Info("app", "pump window lista");
+
+    // tolerante: el kernel arranca aunque el pump window no exista
+    return true;
+}
+
+void PlatformPost(std::function<void()> fn) {
+    bool wake = false;
+    {
+        std::lock_guard lock(g_pendingMu);
+        wake = g_pending.empty(); // solo despierta si la cola estaba vacía
+        g_pending.push(std::move(fn));
+    }
+    if (!wake) return;
+    if (g_pumpHwnd && PostMessageW(g_pumpHwnd, kWmOwPump, 0, 0)) return;
+    // canal viejo: PostThreadMessage exige que la cola del destino exista
+    // (PlatformInit la crea con PeekMessage PM_NOREMOVE); si falla lo
+    // registramos — perder este mensaje = respuesta nunca entregada.
+    if (!PostThreadMessageW(g_mainThreadId, kWmOwPump, 0, 0)) {
+        log::Error("app", "despacho perdido: PostThreadMessageW falló (" +
+                              std::to_string(GetLastError()) + ")");
+    } else if (g_pumpHwnd) {
+        log::Warn("app", "despacho vía PostThreadMessage (fallback)");
     }
 }
 

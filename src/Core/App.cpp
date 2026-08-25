@@ -45,6 +45,12 @@ const ow_module_desc_t* SessionDescriptor();
 const ow_module_desc_t* CrashReporterDescriptor();
 const ow_module_desc_t* AppModuleDescriptor();
 #endif
+#ifdef OW_PLATFORM_WIN
+const ow_module_desc_t* WindowExtrasDescriptorWin();
+#endif
+#ifdef __APPLE__
+const ow_module_desc_t* WindowExtrasDescriptorMac();
+#endif
 
 void RegisterBuiltinModules() {
     Dispatcher::Get().RegisterModule(WindowModuleDescriptorImpl(), "builtin:ow-window");
@@ -53,6 +59,12 @@ void RegisterBuiltinModules() {
     Dispatcher::Get().RegisterModule(SessionDescriptor(), "builtin:session");
     Dispatcher::Get().RegisterModule(CrashReporterDescriptor(), "builtin:crashreporter");
     Dispatcher::Get().RegisterModule(AppModuleDescriptor(), "builtin:app");
+#endif
+#ifdef OW_PLATFORM_WIN
+    Dispatcher::Get().RegisterModule(WindowExtrasDescriptorWin(), "builtin:window");
+#endif
+#ifdef __APPLE__
+    Dispatcher::Get().RegisterModule(WindowExtrasDescriptorMac(), "builtin:window");
 #endif
 }
 

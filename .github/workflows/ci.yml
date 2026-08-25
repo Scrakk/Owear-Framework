@@ -25,7 +25,14 @@ jobs:
         run: |
           sudo apt-get install -y dbus dunst || true
           export $(dbus-launch)   # session bus para notification/power
-          dunst >/dev/null 2>&1 &
+          # dunst crashea puntual en runners (Trace/breakpoint trap):
+          # reintentos con espera activa; si tras 3 intentos no vive, el
+          # E2E sigue (notification/power reportarán fallo visible).
+          for i in 1 2 3; do
+            (dunst >/dev/null 2>&1 &)
+            sleep 1
+            pgrep -x dunst >/dev/null && break
+          done
           MODS=""
           for d in build/linux-release/api/*/; do MODS="$MODS$d:"; done
           MODS=${MODS%:}
@@ -52,27 +59,45 @@ jobs:
         run: cmake --preset windows-release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
       - name: Build
         run: cmake --build --preset windows-release
-      - name: Smoke test (kernel vivo + carga de módulos .dll)
+      - name: Smoke test E2E (kernel + módulos + ventana WebView2 real)
         shell: pwsh
+        timeout-minutes: 5
         run: |
           $exe = "build\windows-release\src\Release\owear.exe"
           if (!(Test-Path $exe)) { $exe = "build\windows-release\src\Debug\owear.exe" }
           Write-Host "exe=$exe"
+          if (!(Test-Path "build\windows-release\src\Release\owear.exe") -and !(Test-Path "build\windows-release\src\Debug\owear.exe")) {
+            Write-Error "owear.exe no existe"; exit 1
+          }
           $mods = (Get-ChildItem "build\windows-release\api" -Directory | ForEach-Object {
               if (Test-Path "$($_.FullName)\Release") { "$($_.FullName)\Release" }
             }) -join ";"
           Write-Host "OW_MODULES_DIR=$mods"
           $env:OW_APP_NAME = "CI"
           $env:OW_MODULES_DIR = $mods
-          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow -RedirectStandardError "owear-smoke.err.log"
-          Start-Sleep -Seconds 8
-          if ($proc.HasExited) {
-            Get-Content "owear-smoke.err.log" | ForEach-Object { Write-Host $_ }
-            Write-Error "el kernel murió en el arranque (exit $($proc.ExitCode))"
-            exit 1
+          $proc = Start-Process -FilePath $exe -PassThru -NoNewWindow `
+                    -RedirectStandardError "owear-smoke.err.log" `
+                    -RedirectStandardOutput "owear-smoke.out.log"
+          try {
+            python tests/smoke_windows.py $proc.Id
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            # suite E2E completa (mismas páginas que Linux): all + builtins
+            python tests/e2e/run_suites.py --pid $proc.Id --pages all.html builtins.html --port 8123
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            # salida limpia: app.quit por la pipe y WaitForExit
+            python tests/quit_windows.py $proc.Id
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            $proc.WaitForExit(20000) | Out-Null
+            if (-not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force
+              Write-Error "el kernel no salió tras app.quit"
+              exit 1
+            }
+            Write-Host "smoke E2E OK: ventana WebView2 creada y salida limpia (exit $($proc.ExitCode))"
+          } finally {
+            Write-Host "::group::stderr del kernel"; Get-Content "owear-smoke.err.log" -ErrorAction SilentlyContinue; Write-Host "::endgroup::"
+            Write-Host "::group::stdout del kernel"; Get-Content "owear-smoke.out.log" -ErrorAction SilentlyContinue; Write-Host "::endgroup::"
           }
-          Stop-Process -Id $proc.Id -Force
-          Write-Host "smoke OK: kernel vivo tras 8s con $($mods.Split(';').Count) módulos cargados"
 
   macos:
     name: macOS · compile + smoke (Cocoa/WebKit frameworks)
@@ -104,6 +129,28 @@ jobs:
           fi
           kill $KPID
           echo "smoke OK: kernel vivo tras 8s"
+      - name: E2E suite completa (all + builtins vía WKWebView)
+        run: |
+          MODS=""
+          for d in build/macos-release/api/*/; do MODS="$MODS$d:"; done
+          MODS=${MODS%:}
+          OW_APP_NAME=CI OW_MODULES_DIR="$MODS" \
+            ./build/macos-release/src/owear > /tmp/owear-e2e.log 2>&1 &
+          KPID=$!
+          sleep 8
+          if ! kill -0 $KPID 2>/dev/null; then
+            echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::"
+            echo "el kernel murió en el arranque"; exit 1
+          fi
+          RUNNER=""
+          if command -v timeout >/dev/null 2>&1; then RUNNER="timeout 150";
+          elif command -v gtimeout >/dev/null 2>&1; then RUNNER="gtimeout 150"; fi
+          $RUNNER python3 tests/e2e/run_suites.py \
+            --pages all.html builtins.html --port 8123 || \
+          { echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::";
+            kill $KPID 2>/dev/null; exit 1; }
+          kill $KPID 2>/dev/null
+          echo "E2E macOS OK"
       # Los .mm de Cocoa/WebKit se compilan aquí: errores reales visibles.
 
   packages:

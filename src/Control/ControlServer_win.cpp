@@ -75,10 +75,13 @@ public:
                       static_cast<unsigned long>(GetCurrentProcessId()));
         socketPath_ = name;
 
-        // pipe duplex por mensaje; aceptamos un cliente a la vez (SDK único)
+        // pipe duplex por mensaje; aceptamos un cliente a la vez (SDK único).
+        // SIN FILE_FLAG_OVERLAPPED: todo el I/O de este hilo es bloqueante
+        // (ConnectNamedPipe/ReadFile/WriteFile con OVERLAPPED=nullptr exige
+        // handle síncrono; con overlapped+nullptr el comportamiento es indefinido).
         pipe_ = CreateNamedPipeA(
             name,
-            PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+            PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             4,   // instancias
             64 * 1024, 64 * 1024, 0, nullptr);
@@ -90,24 +93,50 @@ public:
     }
 
     void PlatformSend(uint64_t clientId, std::string_view line) override {
-        std::lock_guard lock(sendMu_);
-        if (clientId == 0) {
-            for (auto& [id, buf] : clients_) WriteClient(buf, line);
-            return;
+        // NO escribir aquí: este lo llama el hilo principal y el handle del
+        // pipe está síncrono-bloqueado en ReadFile por el hilo lector (I/O
+        // serializada en el mismo handle = la escritura no saldría hasta
+        // que el lector desbloquee). Encolamos y despertamos al lector.
+        {
+            std::lock_guard lock(outboxMu_);
+            if (clientId == 0) {
+                for (auto& [id, c] : clients_)
+                    outbox_.push_back({id, std::string(line) + '\n'});
+            } else if (clients_.count(clientId)) {
+                outbox_.push_back({clientId, std::string(line) + '\n'});
+            }
         }
-        if (auto it = clients_.find(clientId); it != clients_.end())
-            WriteClient(it->second, line);
+        if (pipe_ != INVALID_HANDLE_VALUE)
+            CancelIoEx(pipe_, nullptr); // aborta el ReadFile para que drene
     }
 
     void PlatformStop() override {
+        // orden crítico: primero despierta al lector (CancelIoEx), luego
+        // espera a que SALGA de AcceptOne (ningún uso del handle en vuelo),
+        // y SOLO entonces destruye el handle.
         running_ = false;
-        if (pipe_ != INVALID_HANDLE_VALUE) {
+        if (pipe_ != INVALID_HANDLE_VALUE)
             CancelIoEx(pipe_, nullptr);
+        if (readerThread_.joinable()) readerThread_.join();
+        // respuestas encoladas sin entregar (p.ej. la de app.quit: el lector
+        // dejó de drenar cuando running_ pasó a false). El handle ya es
+        // exclusivo de este hilo — escritura directa segura.
+        std::vector<std::pair<uint64_t, std::string>> pend;
+        {
+            std::lock_guard lock(outboxMu_);
+            pend.swap(outbox_);
+        }
+        for (auto& [id, payload] : pend) {
+            if (pipe_ == INVALID_HANDLE_VALUE) break;
+            ClientBuf tmp{pipe_, {}};
+            WriteClient(tmp, payload);
+        }
+        if (pipe_ != INVALID_HANDLE_VALUE) FlushFileBuffers(pipe_);
+        if (pipe_ != INVALID_HANDLE_VALUE) {
             DisconnectNamedPipe(pipe_);
             CloseHandle(pipe_);
             pipe_ = INVALID_HANDLE_VALUE;
         }
-        if (readerThread_.joinable()) readerThread_.join();
     }
 
 private:
@@ -121,12 +150,49 @@ private:
         DWORD written = 0;
         std::string out(line);
         out += '\n';
-        WriteFile(c.handle, out.data(), static_cast<DWORD>(out.size()), &written, nullptr);
+        if (!WriteFile(c.handle, out.data(), static_cast<DWORD>(out.size()),
+                       &written, nullptr)) {
+            log::Error("control", "WriteFile al cliente falló: " +
+                                      std::to_string(GetLastError()));
+        }
+    }
+
+    void RecreatePipe() {
+        // SIN FILE_FLAG_FIRST_PIPE_INSTANCE: ese flag exige ser la primera
+        // instancia del nombre y las recreaciones tras desconexión siempre
+        // fallarían (mordido: solo el primer cliente podía conectar).
+        pipe_ = CreateNamedPipeA(
+            socketPath_.c_str(),
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            4, 64 * 1024, 64 * 1024, 0, nullptr);
+        if (pipe_ == INVALID_HANDLE_VALUE) {
+            log::Error("control", "RecreatePipe falló: " +
+                                      std::to_string(GetLastError()));
+        }
     }
 
     void AcceptOne() {
         if (!ConnectNamedPipe(pipe_, nullptr) &&
             GetLastError() != ERROR_PIPE_CONNECTED) {
+            // CancelIoEx (PlatformSend/Stop) aborta también la espera de
+            // conexión: drena el outbox pendiente y reintenta si seguimos
+            // vivos (sin esto, la respuesta de app.quit se pierde).
+            if (running_) {
+                DrainOutbox();
+                if (pipe_ != INVALID_HANDLE_VALUE) return; // ReaderLoop reitera
+            }
+            return;
+        }
+
+        // ImpersonateNamedPipeClient exige que el cliente haya hecho I/O en
+        // la pipe: leemos el primer chunk ANTES de verificar identidad
+        // (gotcha Win32 — verificado en CI).
+        char buf[8192];
+        DWORD n = 0;
+        if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) {
+            DisconnectNamedPipe(pipe_);
+            if (running_) RecreatePipe();
             return;
         }
 
@@ -135,27 +201,23 @@ private:
         if (!ClientIsSameUser(pipe_)) {
             log::Warn("control", "conexión rechazada: usuario del pipe no coincide");
             DisconnectNamedPipe(pipe_);
-            if (running_) {
-                pipe_ = CreateNamedPipeA(
-                    socketPath_.c_str(),
-                    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                    4, 64 * 1024, 64 * 1024, 0, nullptr);
-            }
+            if (running_) RecreatePipe();
             return;
         }
 
         uint64_t id = nextClientId_++;
-        clients_[id] = ClientBuf{pipe_, {}};
-        activeHandle_ = pipe_;
+        {
+            std::lock_guard lock(clientsMu_);
+            clients_[id] = ClientBuf{pipe_, {}};
+        }
 
-        // lee hasta desconexión (un cliente por instancia v1)
-        char buf[8192];
-        DWORD n = 0;
-        while (running_) {
-            if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) break;
-            auto& acc = clients_[id].pending;
-            acc.append(buf, n);
+        auto processChunk = [&](const char* data, DWORD len) {
+            std::string acc;
+            {
+                std::lock_guard lock(clientsMu_);
+                acc = std::move(clients_[id].pending);
+            }
+            acc.append(data, len);
             size_t pos;
             while ((pos = acc.find('\n')) != std::string::npos) {
                 std::string line = acc.substr(0, pos);
@@ -166,19 +228,56 @@ private:
                 // lector queda dedicado exclusivamente a I/O del pipe.
                 App::Post([this, id, line] { HandleLine(id, line); });
             }
+            std::lock_guard lock(clientsMu_);
+            clients_[id].pending = std::move(acc);
+        };
+        processChunk(buf, n);
+
+        // lee hasta desconexión (un cliente por instancia v1). CancelIoEx
+        // (desde PlatformSend) aborta este ReadFile para que drene el outbox
+        // de respuestas: I/O síncrona en un handle es serializada, así que
+        // escribir desde otro hilo aquí colgaría detrás de este ReadFile.
+        while (running_) {
+            if (!ReadFile(pipe_, buf, sizeof(buf), &n, nullptr) || n == 0) {
+                if (GetLastError() == ERROR_OPERATION_ABORTED) {
+                    DrainOutbox();
+                    continue;
+                }
+                break;
+            }
+            processChunk(buf, n);
+            DrainOutbox();
         }
-        std::lock_guard lock(sendMu_);
-        clients_.erase(id);
+        {
+            std::lock_guard lock(clientsMu_);
+            clients_.erase(id);
+        }
         DisconnectNamedPipe(pipe_);
         // recrea instancia para el siguiente cliente
-        if (running_) {
-            pipe_ = CreateNamedPipeA(
-                socketPath_.c_str(),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                4, 64 * 1024, 64 * 1024, 0, nullptr);
+        if (running_) RecreatePipe();
+    }
+
+private:
+    void DrainOutbox() {
+        std::vector<std::pair<uint64_t, std::string>> batch;
+        {
+            std::lock_guard lock(outboxMu_);
+            batch.swap(outbox_);
+        }
+        for (auto& [id, payload] : batch) {
+            HANDLE h = INVALID_HANDLE_VALUE;
+            {
+                std::lock_guard lock(clientsMu_);
+                if (auto it = clients_.find(id); it != clients_.end())
+                    h = it->second.handle;
+            }
+            if (h == INVALID_HANDLE_VALUE) continue;
+            ClientBuf tmp{h, {}};
+            WriteClient(tmp, payload);
         }
     }
+
+public:
 
     void ReaderLoop() {
         while (running_) AcceptOne();
@@ -187,10 +286,11 @@ private:
     HANDLE pipe_ = INVALID_HANDLE_VALUE;
     std::thread readerThread_;
     std::atomic<bool> running_{true};
+    std::mutex clientsMu_;
     std::map<uint64_t, ClientBuf> clients_;
-    std::mutex sendMu_;
+    std::mutex outboxMu_;
+    std::vector<std::pair<uint64_t, std::string>> outbox_;
     uint64_t nextClientId_ = 1;
-    HANDLE activeHandle_ = INVALID_HANDLE_VALUE;
 };
 
 } // namespace
