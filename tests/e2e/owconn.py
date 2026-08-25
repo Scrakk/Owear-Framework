@@ -36,11 +36,15 @@ def _find_unix(wait_s: float) -> "LineConn":
     import glob
     import socket
 
-    sock_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    sock_dirs = [os.environ.get("XDG_RUNTIME_DIR", ""),
+                 os.environ.get("TMPDIR", ""), "/tmp"]
     deadline = time.time() + wait_s
     while time.time() < deadline:
-        socks = sorted(glob.glob(os.path.join(sock_dir, "owear-*.sock")),
-                       key=os.path.getmtime)
+        socks = []
+        for d in sock_dirs:
+            if d and os.path.isdir(d):
+                socks += glob.glob(os.path.join(d, "owear-*.sock"))
+        socks = sorted(socks, key=os.path.getmtime)
         if socks:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(socks[-1])
@@ -196,8 +200,12 @@ def _win_kernel_pids():
     TH32CS_SNAPPROCESS = 0x2
 
     def snap():
+        k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+        k32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        k32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESSENTRY32W)]
+        k32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESSENTRY32W)]
         h = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-        if h == -1 or h == (1 << (8 * ctypes.sizeof(ctypes.c_void_p))) - 1:
+        if not h or h == (1 << (8 * ctypes.sizeof(ctypes.c_void_p))) - 1:
             return []
         out = []
         e = PROCESSENTRY32W()
