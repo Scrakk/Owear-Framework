@@ -189,8 +189,11 @@ bool Window::Impl::PCreate() {
     pdata->hwnd = hwnd;
     HwndMap()[hwnd] = this;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pdata));
-    pdata->origProc = reinterpret_cast<WNDPROC>(
-        SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(OwWndProc)));
+    // NO subclasar: la clase OwearWindow ya registra OwWndProc. Un
+    // SetWindowLongPtr(GWLP_WNDPROC, OwWndProc) aquí devolvería como
+    // origProc el propio OwWndProc → CallWindowProcW recursivo infinito
+    // → 0xC00000FD en la init de WebView2 (mordido en CI).
+    pdata->origProc = nullptr;
 
     if (!opts.resizable) {
         DWORD s = GetWindowLongW(hwnd, GWL_STYLE);
