@@ -84,6 +84,7 @@ elseif(OW_PLATFORM STREQUAL "win")
         Window/window_win.cpp
         Control/ControlServer_win.cpp
         Runtime/NodeManager_win.cpp
+        Webview/win/BuiltinUtil_win.cpp
     )
     if(OW_WITH_WEBVIEW2)
         list(APPEND OW_KERNEL_SOURCES Webview/win/Webview2Backend.cpp)
@@ -101,6 +102,7 @@ elseif(OW_PLATFORM STREQUAL "mac")
         Webview/mac/WKWebviewBackend.mm
         Control/ControlServer_mac.mm
         Runtime/NodeManager_mac.mm
+        Webview/mac/BuiltinUtil_mac.mm
         # builtin window-extras nativo (WKWebView: capture/zoom/opacity/...)
         ${CMAKE_SOURCE_DIR}/api/window/src/window_extra_mac.mm
     )

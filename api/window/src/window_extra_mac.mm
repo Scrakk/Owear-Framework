@@ -5,8 +5,11 @@
 // Funciones avanzadas de ventana acopladas a WKWebView.
 //
 #include "../../../src/Core/BuiltinUtil.hpp"
+#include "ow/Base64.h"
 #include "ow/Json.h"
 #include "ow/Module.h"
+#include "ow/Shm.h"
+#include "ow_api.h"
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -64,7 +67,7 @@ void capturePage(const ow_request_t* req, ow_response_t* res) {
                       completionHandler:^(NSImage* img, NSError* err) {
         if (err) { errText = err.localizedDescription; }
         else if (img) {
-            CGImageRef cg = [img CGImage];
+            CGImageRef cg = img.CGImage;
             NSBitmapImageRep* rep =
                 [[NSBitmapImageRep alloc] initWithCGImage:cg];
             png = [rep representationUsingType:NSBitmapImageFileTypePNG
@@ -134,11 +137,11 @@ void flashFrame(const ow_request_t* req, ow_response_t* res) {
     Value args = parsed.value ? std::move(*parsed.value) : Value(nullptr);
     uint32_t id = WinId(args);
     NEED_WIN(id)
-    NSApplicationActivationOptions opt = GetBoolArg(args, 1, false)
-        ? NSApplicationActivateIgnoringOtherApps
-        : NSApplicationActivateAll;
-    [[NSRunningApplication currentApplication]
-        activateWithOptions:opt];
+    NSWindow* win = view.window;
+    if (!win) return RespondError(res, "ventana no encontrada");
+    if (GetBoolArg(args, 1, false)) {
+        [win orderFrontRegardless]; // atención sin robar focus agresivo
+    }
     RespondOk(res, "null");
 }
 
