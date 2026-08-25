@@ -25,9 +25,14 @@ jobs:
         run: |
           sudo apt-get install -y dbus dunst || true
           export $(dbus-launch)   # session bus para notification/power
-          # dunst crashea puntual en runners (Trace/breakpoint trap); si
-          # muere tras el arranque el E2E sigue — solo notifications lo usa.
-          (dunst >/dev/null 2>&1 &) || true
+          # dunst crashea puntual en runners (Trace/breakpoint trap):
+          # reintentos con espera activa; si tras 3 intentos no vive, el
+          # E2E sigue (notification/power reportarán fallo visible).
+          for i in 1 2 3; do
+            (dunst >/dev/null 2>&1 &)
+            sleep 1
+            pgrep -x dunst >/dev/null && break
+          done
           MODS=""
           for d in build/linux-release/api/*/; do MODS="$MODS$d:"; done
           MODS=${MODS%:}
@@ -78,6 +83,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit 1 }
             # suite E2E completa (mismas páginas que Linux): all + builtins
             python tests/e2e/run_suites.py --pages all.html builtins.html --port 8123
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            # salida limpia: app.quit por la pipe y WaitForExit
+            python tests/quit_windows.py $proc.Id
             if ($LASTEXITCODE -ne 0) { exit 1 }
             $proc.WaitForExit(20000) | Out-Null
             if (-not $proc.HasExited) {
@@ -134,7 +142,10 @@ jobs:
             echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::"
             echo "el kernel murió en el arranque"; exit 1
           fi
-          timeout 150 python3 tests/e2e/run_suites.py \
+          RUNNER=""
+          if command -v timeout >/dev/null 2>&1; then RUNNER="timeout 150";
+          elif command -v gtimeout >/dev/null 2>&1; then RUNNER="gtimeout 150"; fi
+          $RUNNER python3 tests/e2e/run_suites.py \
             --pages all.html builtins.html --port 8123 || \
           { echo "::group::log del kernel"; cat /tmp/owear-e2e.log; echo "::endgroup::";
             kill $KPID 2>/dev/null; exit 1; }

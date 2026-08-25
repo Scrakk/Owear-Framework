@@ -106,9 +106,8 @@ if not r.get("ok"):
 wid = r.get("result", {}).get("windowId")
 print(f"[smoke] ventana creada id={wid}")
 
-time.sleep(4)  # environment+controller+navigation reales de WebView2
-
-r = rpc(h, 2, "app.quit")
-print(f"[smoke] app.quit ok={r.get('ok')}")
-sys.exit(0)
+r = rpc(h, 2, "app.info")  # sigue vivo tras crear la ventana
+print(f"[smoke] post-ventana ok={r.get('ok')}")
+# sin app.quit aquí: la suite E2E completa corre después y su flujo
+# termina con su propio ciclo; el CI mata el proceso al final.
 
